@@ -11,7 +11,7 @@ int main() {
 
     InitWindow(1280, 720, "Quark Engine");
 
-    SetTargetFPS(60);
+    SetTargetFPS(GetMonitorRefreshRate(GetCurrentMonitor()));
     rlImGuiSetup(true);
     SetExitKey(0);
 
