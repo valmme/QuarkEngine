@@ -29,16 +29,22 @@ set(SOURCE_FILES
 
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 
-target_link_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/quark-libs/raylib/lib)
+set(RAYLIB_LIB_DIR "${CMAKE_SOURCE_DIR}/quark-libs/raylib/lib")
 
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/assets
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
-    COMMENT "Copying assets to output directory"
-)
+set(ASSETS_DIR "${CMAKE_SOURCE_DIR}/assets")
+if(EXISTS "${ASSETS_DIR}")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${ASSETS_DIR}"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+        COMMENT "Copying assets to output directory"
+    )
+else()
+    message(WARNING "Assets directory not found: ${ASSETS_DIR}. Skipping asset copy step.")
+endif()
 
 if(WIN32)
+    target_link_directories(${PROJECT_NAME} PRIVATE ${RAYLIB_LIB_DIR})
     target_link_libraries(${PROJECT_NAME}
         raylib
         winmm
@@ -46,8 +52,16 @@ if(WIN32)
         opengl32
     )
 elseif(UNIX AND NOT APPLE)
+    if(EXISTS "${RAYLIB_LIB_DIR}/libraylib.a")
+        set(RAYLIB_LIB "${RAYLIB_LIB_DIR}/libraylib.a")
+    elseif(EXISTS "${RAYLIB_LIB_DIR}/libraylib.so.5.5.0")
+        set(RAYLIB_LIB "${RAYLIB_LIB_DIR}/libraylib.so.5.5.0")
+    else()
+        set(RAYLIB_LIB raylib)
+    endif()
+
     target_link_libraries(${PROJECT_NAME}
-        raylib
+        ${RAYLIB_LIB}
         GL
         m
         pthread
@@ -57,6 +71,7 @@ elseif(UNIX AND NOT APPLE)
     )
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 elseif(APPLE)
+    target_link_directories(${PROJECT_NAME} PRIVATE ${RAYLIB_LIB_DIR})
     target_link_libraries(${PROJECT_NAME}
         raylib
         "-framework Cocoa"
