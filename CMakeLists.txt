@@ -9,7 +9,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 include_directories(
     ${CMAKE_SOURCE_DIR}/quark-libs/imgui/include
     ${CMAKE_SOURCE_DIR}/quark-libs/raylib/include
-    ${CMAKE_SOURCE_DIR}/quark-libs/rlImGui
     ${CMAKE_SOURCE_DIR}/src/headers
 )
 
@@ -21,16 +20,16 @@ set(SOURCE_FILES
     src/ImGuizmo.cpp
     src/tex.cpp
     src/models.cpp
-
     quark-libs/imgui/include/imgui.cpp
     quark-libs/imgui/include/imgui_draw.cpp
     quark-libs/imgui/include/imgui_widgets.cpp
     quark-libs/imgui/include/imgui_tables.cpp
-
-    quark-libs/rlImGui/rlImGui.cpp
+    quark-libs/imgui/include/rlImGui.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
+
+target_link_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/quark-libs/raylib/lib)
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -41,27 +40,25 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 
 if(WIN32)
     target_link_libraries(${PROJECT_NAME}
-        ${CMAKE_SOURCE_DIR}/quark-libs/raylib/lib/raylib.lib
+        raylib
         winmm
         gdi32
         opengl32
     )
-
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(${PROJECT_NAME}
-        ${CMAKE_SOURCE_DIR}/quark-libs/raylib/lib/libraylib.a
+        raylib
+        GL
         m
         pthread
         dl
         rt
         X11
-        GL
     )
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
-
 elseif(APPLE)
     target_link_libraries(${PROJECT_NAME}
-        ${CMAKE_SOURCE_DIR}/quark-libs/raylib/lib/libraylib.a
+        raylib
         "-framework Cocoa"
         "-framework OpenGL"
         "-framework IOKit"
