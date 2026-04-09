@@ -48,6 +48,10 @@ int main() {
         EndDrawing();
     }
 
+    editor.scene.release_resources();
+    unload_models();
+    unload_textures();
+
     rlImGuiShutdown();
     CloseWindow();
 }

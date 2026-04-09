@@ -11,7 +11,7 @@ struct ModelAsset {
     ObjectType type;
     bool isProcedural;
     std::function<Model(int)> generator;
-    Model loadedModel;
+    Model loadedModel = {0};
 };
 
 struct Entity {
@@ -22,12 +22,12 @@ struct Entity {
     Vector3 rotation;
     Vector3 scale;
 
-    Texture2D texture;
+    Texture2D texture = {0};
 
     bool auto_uv;
     bool texture_stretch = true; 
 
-    Model model;
+    Model model = {0};
     ModelAsset* asset;
 
     float texture_repeat_u;

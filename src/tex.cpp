@@ -1,4 +1,6 @@
 #include "headers/tex.h"
+#include <unordered_map>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 std::vector<TextureOption> texture_options;
@@ -10,18 +12,30 @@ static bool is_image_file(const fs::path& p) {
 }
 
 void load_textures() {
+    if (!fs::exists("assets")) fs::create_directories("assets");
+
+    unload_textures();
     texture_options.clear();
     texture_options.push_back({ "None", {0} });
 
-    for (const auto& entry : std::filesystem::directory_iterator("assets")) {
+    for (const auto& entry : fs::directory_iterator("assets")) {
         if (!entry.is_regular_file()) continue;
-        std::string path = entry.path().string();
+        if (!is_image_file(entry.path())) continue;
 
-        if (path.substr(path.size() - 4) == ".png") {
-            Texture2D tex = LoadTexture(path.c_str());
-            texture_options.push_back({ entry.path().filename().string(), tex });
+        Texture2D tex = LoadTexture(entry.path().string().c_str());
+        texture_options.push_back({ entry.path().filename().string(), tex });
+    }
+}
+
+void unload_textures() {
+    std::unordered_set<unsigned int> released_ids;
+    for (const auto& opt : texture_options) {
+        if (opt.texture.id == 0) continue;
+        if (released_ids.insert(opt.texture.id).second) {
+            UnloadTexture(opt.texture);
         }
     }
+    texture_options.clear();
 }
 
 void apply_texture_repeat(Entity &e) {
@@ -137,15 +151,18 @@ void draw_entity_with_texture(Entity& e) {
     rlPopMatrix();
 }
 
-void refresh_textures() {
-    texture_options.clear();
-
+void refresh_textures(Scene* scene) {
     if (!fs::exists("assets")) fs::create_directories("assets");
 
-    TextureOption empty;
-    empty.name = "None";
-    empty.texture = {0};
-    texture_options.push_back(empty);
+    std::unordered_map<std::string, Texture2D> old_by_name;
+    for (const auto& opt : texture_options) {
+        if (opt.texture.id != 0) {
+            old_by_name[opt.name] = opt.texture;
+        }
+    }
+
+    std::vector<TextureOption> next_options;
+    next_options.push_back({ "None", {0} });
 
     for (auto& entry : fs::directory_iterator("assets")) {
         if (!entry.is_regular_file()) continue;
@@ -153,12 +170,35 @@ void refresh_textures() {
         fs::path path = entry.path();
         if (!is_image_file(path)) continue;
 
+        const std::string texture_name = path.filename().string();
+        auto old_it = old_by_name.find(texture_name);
+        if (old_it != old_by_name.end()) {
+            next_options.push_back({ texture_name, old_it->second });
+            old_by_name.erase(old_it);
+            continue;
+        }
+
         Texture2D tex = LoadTexture(path.string().c_str());
-
-        TextureOption opt;
-        opt.name = path.filename().string();
-        opt.texture = tex;
-
-        texture_options.push_back(opt);
+        next_options.push_back({ texture_name, tex });
     }
+
+    if (scene) {
+        for (const auto& [_, removed_tex] : old_by_name) {
+            for (auto& entity : scene->entities) {
+                if (entity.texture.id == removed_tex.id) {
+                    entity.texture = {0};
+                }
+            }
+        }
+    }
+
+    std::unordered_set<unsigned int> released_ids;
+    for (const auto& [_, removed_tex] : old_by_name) {
+        if (removed_tex.id == 0) continue;
+        if (released_ids.insert(removed_tex.id).second) {
+            UnloadTexture(removed_tex);
+        }
+    }
+
+    texture_options = std::move(next_options);
 }

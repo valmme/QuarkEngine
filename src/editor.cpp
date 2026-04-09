@@ -39,7 +39,7 @@ void Editor::handle_input() {
         }
 
         UnloadDroppedFiles(dropped);
-        refresh_textures();
+        refresh_textures(&scene);
     }
 
 }

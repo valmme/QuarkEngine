@@ -1,4 +1,5 @@
 #include "headers/models.h"
+#include <unordered_set>
 
 std::vector<ModelAsset> assets;
 
@@ -52,4 +53,20 @@ void update_model(Entity* e) {
     if (e->segments < 3) e->segments = 3;
     if (e->segments > 125) e->segments = 125;
     e->model = e->asset->generator(e->segments);
+}
+
+void unload_models() {
+    std::unordered_set<void*> released_meshes;
+
+    for (auto& asset : assets) {
+        if (!asset.isProcedural && asset.loadedModel.meshCount > 0 && asset.loadedModel.meshes) {
+            void* mesh_ptr = static_cast<void*>(asset.loadedModel.meshes);
+            if (released_meshes.insert(mesh_ptr).second) {
+                UnloadModel(asset.loadedModel);
+            }
+        }
+        asset.loadedModel = {0};
+    }
+
+    assets.clear();
 }

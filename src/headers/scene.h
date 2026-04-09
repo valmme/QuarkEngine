@@ -9,4 +9,5 @@ struct Scene {
 
     void add_object(Model model, ObjectType type);
     Entity* get_selected();
+    void release_resources();
 };
