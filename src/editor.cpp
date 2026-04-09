@@ -5,21 +5,43 @@
 #include "headers/entity.h"
 #include "headers/ImGuizmo.h"
 
+namespace fs = std::filesystem;
+
 static ImGuizmo::OPERATION gizmo_mode = ImGuizmo::TRANSLATE;
 static int renaming_index = -1;
 static char rename_buf[128] = "";
 
 void Editor::handle_input() {
-    Entity* e = scene.get_selected();
-    if (!e) return;
     float speed = 0.1f;
-    if (IsKeyDown(KEY_RIGHT)) e->position.x += speed;
-    if (IsKeyDown(KEY_LEFT))  e->position.x -= speed;
-    if (IsKeyDown(KEY_UP))    e->position.z -= speed;
-    if (IsKeyDown(KEY_DOWN))  e->position.z += speed;
+    Entity* e = scene.get_selected();
+
+    if (e) {
+        if (IsKeyDown(KEY_RIGHT)) e->position.x += speed;
+        if (IsKeyDown(KEY_LEFT))  e->position.x -= speed;
+        if (IsKeyDown(KEY_UP))    e->position.z -= speed;
+        if (IsKeyDown(KEY_DOWN))  e->position.z += speed;
+    }
+
     if (IsKeyPressed(KEY_P)) gizmo_mode = ImGuizmo::TRANSLATE;
     if (IsKeyPressed(KEY_R)) gizmo_mode = ImGuizmo::ROTATE;
     if (IsKeyPressed(KEY_S)) gizmo_mode = ImGuizmo::SCALE;
+
+
+    if (IsFileDropped()) {
+        FilePathList dropped = LoadDroppedFiles();
+
+        if (!fs::exists("assets")) fs::create_directories("assets");
+
+        for (unsigned int i = 0; i < dropped.count; i++) {
+            fs::path src(dropped.paths[i]);
+            fs::path dst = fs::path("assets") / src.filename();
+            fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
+        }
+
+        UnloadDroppedFiles(dropped);
+        refresh_textures();
+    }
+
 }
 
 void Editor::draw_gizmo(Camera3D camera) {
@@ -111,11 +133,11 @@ void Editor::draw_ui() {
     ImGui::End();
 
     if (renaming_index != -1) { 
-        ImGui::OpenPopup("RenamePopup"); 
+        ImGui::OpenPopup("Rename"); 
         renaming_index = -2; 
     }
     
-    if (ImGui::BeginPopupModal("RenamePopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal("Rename", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::InputText("##rename", rename_buf, IM_ARRAYSIZE(rename_buf));
         if (ImGui::Button("OK")) {
             if (renaming_index == -2) {
@@ -277,5 +299,8 @@ void Editor::draw_ui() {
     ImGui::SetNextWindowSize(ImVec2(1270, 165), ImGuiCond_Once);
     ImGui::SetNextWindowPos(ImVec2(5, 550), ImGuiCond_Once);
     ImGui::Begin("Assets", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+
+    
+
     ImGui::End();
 }

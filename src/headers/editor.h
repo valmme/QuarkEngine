@@ -6,7 +6,7 @@
 
 struct Editor {
     Scene scene;
-
+    
     void draw_ui();
     void handle_input();
     void draw_entity_with_texture(Entity& e);

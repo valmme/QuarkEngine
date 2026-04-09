@@ -1,6 +1,13 @@
 #include "headers/tex.h"
 
+namespace fs = std::filesystem;
 std::vector<TextureOption> texture_options;
+
+static bool is_image_file(const fs::path& p) {
+    std::string ext = p.extension().string();
+    for (auto& c : ext) c = (char)tolower(c);
+    return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga";
+}
 
 void load_textures() {
     texture_options.clear();
@@ -128,4 +135,30 @@ void draw_entity_with_texture(Entity& e) {
     DrawModel(e.model, {0,0,0}, 1.0f, e.color);
     DrawModelWires(e.model, {0,0,0}, 1.0f, e.outline_color);
     rlPopMatrix();
+}
+
+void refresh_textures() {
+    texture_options.clear();
+
+    if (!fs::exists("assets")) fs::create_directories("assets");
+
+    TextureOption empty;
+    empty.name = "None";
+    empty.texture = {0};
+    texture_options.push_back(empty);
+
+    for (auto& entry : fs::directory_iterator("assets")) {
+        if (!entry.is_regular_file()) continue;
+
+        fs::path path = entry.path();
+        if (!is_image_file(path)) continue;
+
+        Texture2D tex = LoadTexture(path.string().c_str());
+
+        TextureOption opt;
+        opt.name = path.filename().string();
+        opt.texture = tex;
+
+        texture_options.push_back(opt);
+    }
 }
