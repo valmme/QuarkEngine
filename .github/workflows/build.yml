@@ -1,0 +1,65 @@
+name: Build (Windows & Linux)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build_type: Release
+          - os: windows-latest
+            build_type: Debug
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxxf86vm-dev
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: QuarkEngine-windows-${{ matrix.build_type }}
+          path: |
+            build/bin/${{ matrix.build_type }}/QuarkEngine.exe
+            build/bin/${{ matrix.build_type }}/raylib.dll
+            build/bin/${{ matrix.build_type }}/assets/**
+          if-no-files-found: warn
+
+      - name: Upload artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: QuarkEngine-linux-${{ matrix.build_type }}
+          path: |
+            build/bin/QuarkEngine
+            build/bin/assets/**
+          if-no-files-found: warn
+
