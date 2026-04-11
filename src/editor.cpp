@@ -19,17 +19,9 @@ void Editor::handle_input() {
     float speed = 0.1f;
     Entity* e = scene.get_selected();
 
-    if (e) {
-        if (IsKeyDown(KEY_RIGHT)) e->position.x += speed;
-        if (IsKeyDown(KEY_LEFT))  e->position.x -= speed;
-        if (IsKeyDown(KEY_UP))    e->position.z -= speed;
-        if (IsKeyDown(KEY_DOWN))  e->position.z += speed;
-    }
-
     if (IsKeyPressed(KEY_P)) gizmo_mode = ImGuizmo::TRANSLATE;
     if (IsKeyPressed(KEY_R)) gizmo_mode = ImGuizmo::ROTATE;
     if (IsKeyPressed(KEY_S)) gizmo_mode = ImGuizmo::SCALE;
-
 
     if (IsFileDropped()) {
         FilePathList dropped = LoadDroppedFiles();
@@ -92,26 +84,36 @@ void Editor::draw_ui() {
     ImGui::Begin("Hierarchy", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 
     for (int i = 0; i < scene.entities.size(); i++) {
-        bool selected = (scene.selected == i);
-        if (ImGui::Selectable(scene.entities[i].name.c_str(), selected)) scene.selected = i;
+        Entity& ent = scene.entities[i];
 
-        ImGui::PushID(i);
+        ImGui::PushID(ent.id);
+
+        bool selected = (scene.selected == i);
+        if (ImGui::Selectable(ent.name.c_str(), selected))
+            scene.selected = i;
+
         if (ImGui::BeginPopupContextItem("context", 1)) {
             if (ImGui::MenuItem("Delete")) {
                 scene.entities.erase(scene.entities.begin() + i);
                 if (scene.selected == i) scene.selected = -1;
                 else if (scene.selected > i) scene.selected--;
-                ImGui::EndPopup(); ImGui::PopID(); break;
+                ImGui::EndPopup();
+                ImGui::PopID();
+                break;
             }
+
             if (ImGui::MenuItem("Rename")) {
                 renaming_index = i;
-                const size_t copied = scene.entities[i].name.copy(rename_buf, sizeof(rename_buf) - 1);
+                const size_t copied = ent.name.copy(rename_buf, sizeof(rename_buf) - 1);
                 rename_buf[copied] = '\0';
             }
+
             ImGui::EndPopup();
         }
+
         ImGui::PopID();
     }
+
     if (ImGui::BeginPopupContextWindow("HierarchyContext", ImGuiPopupFlags_NoOpenOverItems)) {
         if (ImGui::BeginMenu("Create")) {
             for (auto& a : assets) {
