@@ -54,7 +54,8 @@ target_include_directories(imgui PUBLIC
 
 target_link_libraries(imgui PUBLIC
     SDL3::SDL3
-    QuarkCore
+    QuarkCore-Vulkan
+    Vulkan::Vulkan
 )
 
 if(WIN32)
@@ -125,6 +126,10 @@ if(BUILD_ENGINE)
 
     add_executable(${PROJECT_NAME} ${SOURCE_FILES} ${EDITOR_FILES})
 
+    if(WIN32)
+        target_sources(${PROJECT_NAME} PRIVATE QuarkEngine.rc)
+    endif()
+
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/quark-libs/freetype/include
         ${CMAKE_SOURCE_DIR}/include
@@ -143,7 +148,7 @@ if(BUILD_ENGINE)
     endif()
 
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        QuarkCore
+        QuarkCore-Vulkan
         imgui
     )
 
@@ -187,6 +192,8 @@ if(BUILD_ENGINE)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:QuarkCore>
+                $<TARGET_FILE:QuarkCore-OpenGL>
+                $<TARGET_FILE:QuarkCore-Vulkan>
                 $<TARGET_FILE:imgui>
                 $<TARGET_FILE:SDL3::SDL3>
                 $<TARGET_FILE:assimp::assimp>
@@ -207,6 +214,8 @@ if(BUILD_ENGINE)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:QuarkCore>
+                $<TARGET_FILE:QuarkCore-OpenGL>
+                $<TARGET_FILE:QuarkCore-Vulkan>
                 $<TARGET_FILE:imgui>
                 $<TARGET_FILE:assimp::assimp>
                 $<TARGET_FILE:freetype>
