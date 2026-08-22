@@ -25,6 +25,8 @@ PluginContext* ctx = nullptr;
 extern bool g_is_scene_hovered;
 extern bool g_is_scene_active;
 extern RenderTexture2D scene_rt;
+extern ImVec2 g_scene_window_pos;
+extern ImVec2 g_scene_window_size;
 
 static bool language_uses_ms_pgothic(const std::string& language_code) {
     return language_code == "japanese" ||
@@ -813,6 +815,19 @@ void Application::render_frame() {
 
         const bool gizmo_busy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
         if (!gizmo_busy && (IsCursorHidden() || g_is_scene_hovered)) {
+            if (SDL_Window* window = GetNativeWindow()) {
+                if (camera.active && g_scene_window_size.x > 0.0f && g_scene_window_size.y > 0.0f) {
+                    const SDL_Rect scene_mouse_rect = {
+                        static_cast<int>(g_scene_window_pos.x),
+                        static_cast<int>(g_scene_window_pos.y),
+                        static_cast<int>(g_scene_window_size.x),
+                        static_cast<int>(g_scene_window_size.y)
+                    };
+                    SDL_SetWindowMouseRect(window, &scene_mouse_rect);
+                } else if (!camera.active) {
+                    SDL_SetWindowMouseRect(window, nullptr);
+                }
+            }
             camera.update(editor.scene);
         }
 

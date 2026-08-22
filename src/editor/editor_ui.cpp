@@ -1600,13 +1600,15 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 }
 
                 if (scene_rt.id > 0) {
+                    const bool vulkan_backend = GetCurrentBackend() == RendererType::Vulkan;
                     qcImGuiAddImage(
                         ImGui::GetWindowDrawList(),
                         &scene_rt.texture,
                         g_scene_window_pos,
                         ImVec2(g_scene_window_pos.x + g_scene_window_size.x,
                             g_scene_window_pos.y + g_scene_window_size.y),
-                        ImVec2(0, 1), ImVec2(1, 0)
+                        vulkan_backend ? ImVec2(0, 0) : ImVec2(0, 1),
+                        vulkan_backend ? ImVec2(1, 1) : ImVec2(1, 0)
                     );
                 }
 
