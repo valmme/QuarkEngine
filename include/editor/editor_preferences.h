@@ -25,6 +25,7 @@ struct EditorPreferences {
     float gizmo_rotation_snap = 15.0f;
     float gizmo_scale_snap = 0.1f;
     bool show_bounding_boxes = false;
+    bool show_selection_visualization = true;
     int selection_red = 80;
     int selection_green = 140;
     int selection_blue = 255;

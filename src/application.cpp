@@ -162,7 +162,7 @@ static void update_plugins(PluginManager& plugin_manager, Editor& editor) {
     plugin_manager.draw_ui_all(*ctx);
 }
 
-static Mat4 compose_entity_transform(const Entity& entity) {
+static Mat4 compose_local_entity_transform(const Entity& entity) {
     const TransformComponent* transform = entity.get_transform_component();
     if (!transform)
         return Mat4::identity();
@@ -185,6 +185,26 @@ static Mat4 compose_entity_transform(const Entity& entity) {
     );
 
     return matTranslation * matRotation * matScale;
+}
+
+static Mat4 compose_entity_transform(const Scene& scene, int entity_index, std::vector<int>& stack) {
+    if (entity_index < 0 || entity_index >= static_cast<int>(scene.entities.size()))
+        return Mat4::identity();
+    if (std::find(stack.begin(), stack.end(), entity_index) != stack.end())
+        return compose_local_entity_transform(scene.entities[entity_index]);
+
+    stack.push_back(entity_index);
+    const Entity& entity = scene.entities[entity_index];
+    Mat4 world = compose_local_entity_transform(entity);
+    if (entity.parent_id >= 0 && entity.parent_id < static_cast<int>(scene.entities.size()))
+        world = compose_entity_transform(scene, entity.parent_id, stack) * world;
+    stack.pop_back();
+    return world;
+}
+
+static Mat4 compose_entity_transform(const Scene& scene, int entity_index) {
+    std::vector<int> stack;
+    return compose_entity_transform(scene, entity_index, stack);
 }
 
 static void expand_bounds_with_point(BoundingBox& bounds, const Vec3& point) {
@@ -214,7 +234,8 @@ static BoundingBox compute_scene_bounds(const Scene& scene) {
             mutable_mesh->bounds_dirty = false;
         }
         BoundingBox local_bounds = mutable_mesh->cached_local_bounds;
-        Mat4 transform = compose_entity_transform(entity);
+        const int entity_index = static_cast<int>(&entity - scene.entities.data());
+        Mat4 transform = compose_entity_transform(scene, entity_index);
 
         const Vec3 corners[8] = {
             { local_bounds.min.x, local_bounds.min.y, local_bounds.min.z },
@@ -334,13 +355,14 @@ static void render_scene_shadow_maps(Scene& scene, Shader shadow_shader,
 
         Mat4 light_view;
         Mat4 light_projection;
-        for (auto& source : scene.entities) {
+        for (int source_index = 0; source_index < static_cast<int>(scene.entities.size()); ++source_index) {
+            auto& source = scene.entities[source_index];
             MeshComponent* mesh = source.get_mesh_component();
             TransformComponent* source_transform = source.get_transform_component();
             if (!mesh || !mesh->enabled || !source_transform ||
                 mesh->model.meshCount <= 0 || !mesh->model.meshes) continue;
 
-            const Mat4 entity_transform = compose_entity_transform(source) * mesh->model.transform;
+            const Mat4 entity_transform = compose_entity_transform(scene, source_index) * mesh->model.transform;
             for (int mesh_index = 0; mesh_index < mesh->model.meshCount; ++mesh_index) {
                 DrawMesh(mesh->model.meshes[mesh_index], shadow_material, entity_transform);
             }
@@ -687,8 +709,14 @@ void Application::update_frame() {
     if (g_editor_preferences.focus_on_selection && editor.scene.selected != last_selected_entity) {
         Entity* selected_entity = editor.scene.get_selected();
         TransformComponent* selected_transform = selected_entity ? selected_entity->get_transform_component() : nullptr;
-        if (selected_transform)
-            camera.focus_on(selected_transform->position);
+        if (selected_transform) {
+            const int selected_index = editor.scene.selected;
+            const Vec3 world_position = Vec3Transform(
+                {0.0f, 0.0f, 0.0f},
+                compose_entity_transform(editor.scene, selected_index)
+            );
+            camera.focus_on(world_position);
+        }
     }
     last_selected_entity = editor.scene.selected;
 
@@ -749,7 +777,8 @@ void Application::render_frame() {
                     DrawLine3D({0, 0, 0}, {0, 3, 0}, GREEN);
                     DrawLine3D({0, 0, 0}, {0, 0, 3}, BLUE);
                 }
-                for (auto& e : editor.scene.entities) {
+                for (int entity_index = 0; entity_index < static_cast<int>(editor.scene.entities.size()); ++entity_index) {
+                    auto& e = editor.scene.entities[entity_index];
                     MeshComponent* mesh = e.get_mesh_component();
                     TransformComponent* transform = e.get_transform_component();
                     MaterialComponent* mat = e.get_material_component();
@@ -767,10 +796,23 @@ void Application::render_frame() {
 
                     int use = (mat && mat->texture.id != 0) ? 1 : 0;
                     SetShaderValue(lighting_shader, use_tex_loc, &use, SHADER_UNIFORM_INT);
-                    draw_entity_with_texture(e);
+                    draw_entity_with_texture(e, compose_entity_transform(editor.scene, entity_index));
+                    if (g_editor_preferences.show_selection_visualization &&
+                        editor.scene.is_selected(entity_index) && mesh->model.meshCount > 0) {
+                        PushMatrix();
+                        MultMatrix(compose_entity_transform(editor.scene, entity_index));
+                        const bool primary_selection = entity_index == editor.scene.selected;
+                        DrawBoundingBox(GetModelBoundingBox(mesh->model), Color{
+                            static_cast<unsigned char>(g_editor_preferences.selection_red),
+                            static_cast<unsigned char>(g_editor_preferences.selection_green),
+                            static_cast<unsigned char>(g_editor_preferences.selection_blue),
+                            static_cast<unsigned char>(primary_selection ? 255 : 150)
+                        });
+                        PopMatrix();
+                    }
                     if (g_editor_preferences.show_bounding_boxes && mesh->model.meshCount > 0) {
                         PushMatrix();
-                        MultMatrix(compose_entity_transform(e));
+                        MultMatrix(compose_entity_transform(editor.scene, entity_index));
                         DrawBoundingBox(GetModelBoundingBox(mesh->model), Color{
                             static_cast<unsigned char>(g_editor_preferences.bounds_red),
                             static_cast<unsigned char>(g_editor_preferences.bounds_green),

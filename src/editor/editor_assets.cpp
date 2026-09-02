@@ -414,6 +414,9 @@ void draw_assets_ui(Editor& editor) {
                 fs::rename(dragged_file_path, dest, ec);
 
                 if (!ec) {
+                    if (is_image_file(dragged_file_path) && fs::exists(dragged_file_path.string() + ".meta")) {
+                        fs::rename(dragged_file_path.string() + ".meta", dest.string() + ".meta", ec);
+                    }
                     refresh_assets(editor.project_path);
                     refresh_textures(&editor.scene, editor.project_path);
                     refresh_models(editor.project_path, editor.scene);
@@ -456,12 +459,15 @@ void draw_assets_ui(Editor& editor) {
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         entry.extension = ext;
         entry.is_material = entry.extension == "mtl";
+        if (!entry.is_directory && entry.extension == "meta") continue;
+        entry.is_texture_meta = entry.extension == "meta" && is_image_file(path.path().stem());
+        if (entry.is_texture_meta && !fs::exists(path.path().parent_path() / path.path().stem())) continue;
 
         if (entry.is_directory) {
             directories.push_back(entry);
         } else {
             const bool matches_filter = g_editor_preferences.asset_filter == 0 ||
-                (g_editor_preferences.asset_filter == 1 && entry.is_image) ||
+                (g_editor_preferences.asset_filter == 1 && (entry.is_image || entry.is_texture_meta)) ||
                 (g_editor_preferences.asset_filter == 2 && entry.is_model) ||
                 (g_editor_preferences.asset_filter == 3 && entry.is_material);
             if (!matches_filter) continue;
@@ -482,7 +488,7 @@ void draw_assets_ui(Editor& editor) {
 
         ImGui::InvisibleButton("##empty_drop_zone", avail);
         if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_TO_ASSETS")) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
                 int idx = *(const int*)payload->Data;
                 Entity e = editor.scene.entities[idx];
 
@@ -550,11 +556,17 @@ void draw_assets_ui(Editor& editor) {
         const bool item_active = ImGui::IsItemActive();
         const bool item_hovered = ImGui::IsItemHovered();
         if (item_hovered) ImGui::SetTooltip("%s", entry.filename.c_str());
-        if (ImGui::IsItemClicked() && !ImGui::IsMouseDragging(0)) editor.selected_asset_index = i;
+        if (ImGui::IsItemClicked() && !ImGui::IsMouseDragging(0)) {
+            editor.selected_asset_index = i;
+            editor.selected_asset_name = entry.filename;
+            editor.scene.selected = -1;
+            editor.scene.selected_entities.clear();
+        }
 
         if (entry.is_directory && item_hovered && ImGui::IsMouseDoubleClicked(0)) {
             editor.current_asset_path /= entry.filename;
             editor.selected_asset_index = -1;
+            editor.selected_asset_name.clear();
             editor_internal::tex_cache.clear();
             model_preview_cache.clear();
 
@@ -605,11 +617,14 @@ void draw_assets_ui(Editor& editor) {
                 std::error_code ec;
                 if (entry.is_directory) fs::remove_all(target, ec);
                 else fs::remove(target, ec);
+                if (entry.is_image) fs::remove(target.string() + ".meta", ec);
+                if (entry.is_texture_meta) fs::remove(texture_path_from_meta(target), ec);
 
                 refresh_textures(&editor.scene, editor.project_path);
                 refresh_assets(editor.project_path);
                 refresh_models(editor.project_path, editor.scene);
                 editor.selected_asset_index = -1;
+                editor.selected_asset_name.clear();
 
                 ImGui::EndPopup();
                 ImGui::EndGroup();
@@ -805,7 +820,7 @@ void draw_assets_ui(Editor& editor) {
     ImGui::InvisibleButton("##bg_drop_zone", bg_size);
 
     if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_TO_ASSETS")) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
             int idx = *(const int*)payload->Data;
             Entity e = editor.scene.entities[idx];
 
@@ -845,6 +860,9 @@ void draw_assets_ui(Editor& editor) {
                 fs::rename(source_path, dest_path, ec);
 
                 if (!ec) {
+                    if (is_image_file(source_path) && fs::exists(source_path.string() + ".meta")) {
+                        fs::rename(source_path.string() + ".meta", dest_path.string() + ".meta", ec);
+                    }
                     refresh_textures(&editor.scene, editor.project_path);
                     refresh_assets(editor.project_path);
                     refresh_models(editor.project_path, editor.scene);
@@ -881,10 +899,14 @@ void draw_assets_ui(Editor& editor) {
                     if (editor_internal::rename_buf[0] != '\0' && old_path != new_path && fs::exists(old_path)) {
                         try {
                             fs::rename(old_path, new_path);
+                            if (is_image_file(old_path) && fs::exists(old_path.string() + ".meta")) {
+                                fs::rename(old_path.string() + ".meta", new_path.string() + ".meta");
+                            }
                             refresh_textures(&editor.scene, editor.project_path);
                             refresh_assets(editor.project_path);
                             refresh_models(editor.project_path, editor.scene);
                             editor.selected_asset_index = -1;
+                            editor.selected_asset_name.clear();
                         } catch (...) {
                         }
                     }
@@ -1009,6 +1031,50 @@ void draw_assets_ui(Editor& editor) {
     }
 
     ImGui::End();
+}
+
+void draw_selected_texture_inspector(Editor& editor) {
+    if (editor.selected_asset_name.empty()) return;
+
+    const fs::path selected = editor.current_asset_path / editor.selected_asset_name;
+    const fs::path texture_path = texture_path_from_meta(selected);
+    if (!is_image_file(texture_path) || !fs::exists(texture_path)) return;
+
+    TextureMeta meta;
+    if (!load_texture_meta(texture_path, meta)) {
+        ensure_texture_meta(texture_path);
+        load_texture_meta(texture_path, meta);
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Texture Importer");
+    ImGui::TextWrapped("%s", texture_path.filename().string().c_str());
+    ImGui::TextDisabled("GUID: %s", meta.guid.c_str());
+
+    bool changed = false;
+    changed |= ImGui::Checkbox("Enable mip maps", &meta.enable_mip_map);
+    changed |= ImGui::Checkbox("sRGB texture", &meta.srgb_texture);
+    changed |= ImGui::Checkbox("Readable", &meta.is_readable);
+    changed |= ImGui::Checkbox("Alpha is transparency", &meta.alpha_is_transparency);
+    const char* filter_modes[] = { "Nearest", "Linear" };
+    const char* wrap_modes[] = { "Repeat", "Clamp" };
+    const char* sprite_modes[] = { "None", "Single", "Multiple" };
+    const char* texture_types[] = { "Default", "Normal", "Sprite", "Cursor", "Cookie", "Lightmap", "Shadowmask", "Directional", "Single channel" };
+    changed |= ImGui::Combo("Filter mode", &meta.filter_mode, filter_modes, IM_ARRAYSIZE(filter_modes));
+    changed |= ImGui::Combo("Wrap U", &meta.wrap_u, wrap_modes, IM_ARRAYSIZE(wrap_modes));
+    changed |= ImGui::Combo("Wrap V", &meta.wrap_v, wrap_modes, IM_ARRAYSIZE(wrap_modes));
+    changed |= ImGui::SliderInt("Max texture size", &meta.max_texture_size, 32, 8192);
+    changed |= ImGui::SliderInt("Compression quality", &meta.compression_quality, 0, 100);
+    changed |= ImGui::Combo("Sprite mode", &meta.sprite_mode, sprite_modes, IM_ARRAYSIZE(sprite_modes));
+    changed |= ImGui::Combo("Texture type", &meta.texture_type, texture_types, IM_ARRAYSIZE(texture_types));
+
+    if (changed) {
+        save_texture_meta(texture_path, meta);
+        const std::string relative_name = fs::relative(texture_path, fs::path(editor.project_path) / "resources").generic_string();
+        for (auto& option : texture_options) {
+            if (option.name == relative_name) apply_texture_meta(option.texture, meta);
+        }
+    }
 }
 
 void Editor::draw_assets_ui() {

@@ -46,7 +46,8 @@ void FlyCamera::update(Scene& scene) {
         g_editor_preferences.camera_fov = cam.fovy;
     }
 
-    if (IsMouseButtonPressed(MouseButton::Left) && !ImGuizmo::IsOver()) {
+    if (IsMouseButtonPressed(MouseButton::Left) &&
+        !ImGuizmo::IsOver() && !ImGui::IsAnyItemActive()) {
         set_camera_capture(true);
         active = true;
     }

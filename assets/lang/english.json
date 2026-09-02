@@ -39,7 +39,7 @@
     "help": "Help",
     "about": "About",
     "about_quark_engine": "About Quark Engine",
-    "quarkcore_version": "QuarkCore Version: %s",
+    "quarkcore_version": "QuarkCore Version: %s-%s",
     "imgui_version": "ImGui Version: %s",
     "open_docs": "Open Documentation",
     "api_docs": "API Documentation",
@@ -91,7 +91,6 @@
     "height": "Height",
     "reset": "Reset",
 
-
     "mesh": "Mesh",
     "mesh_config": "Mesh Configuration",
     "mesh_type": "Mesh Type: %s (Loaded Mesh)",
@@ -121,6 +120,8 @@
     "directional": "Directional",
     "point": "Point",
     "spot": "Spot",
+
+    "text": "3D Text",
 
     "save_material": "Save Material",
     "material_file": "Material File",

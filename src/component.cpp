@@ -19,7 +19,9 @@ void MeshComponent::serialize(nlohmann::json& json) const {
         json["editable_vertices"].push_back({
             v.position.x,
             v.position.y,
-            v.position.z
+            v.position.z,
+            v.u,
+            v.v
         });
     }
 
@@ -57,6 +59,10 @@ void MeshComponent::deserialize(const nlohmann::json& json) {
                 v[1],
                 v[2]
             };
+            if (v.size() >= 5) {
+                vert.u = v[3];
+                vert.v = v[4];
+            }
 
             editable_mesh.vertices.push_back(vert);
         }
@@ -202,6 +208,13 @@ void ComponentManager::deserialize(const nlohmann::json& json) {
                 light->deserialize(comp_json["data"]);
             }
             comp = light;
+        }
+        else if (type_name == "Text" || type_name == "3D Text") {
+            auto text = std::make_shared<Text3DComponent>();
+            if (comp_json.contains("data")) {
+                text->deserialize(comp_json["data"]);
+            }
+            comp = text;
         }
         
         if (comp) {

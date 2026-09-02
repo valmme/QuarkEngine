@@ -259,10 +259,10 @@ static bool detach_single_mesh_triangles(Mesh& mesh) {
 
     Mesh detached = mesh;
     detached.vertexCount = detached_vertex_count;
-    detached.vertices = static_cast<float*>(malloc(vertices.size() * sizeof(float)));
-    detached.texcoords = mesh.texcoords ? static_cast<float*>(malloc(texcoords.size() * sizeof(float))) : nullptr;
-    detached.normals = mesh.normals ? static_cast<float*>(malloc(normals.size() * sizeof(float))) : nullptr;
-    detached.colors = mesh.colors ? static_cast<unsigned char*>(malloc(colors.size() * sizeof(unsigned char))) : nullptr;
+    detached.vertices = new float[vertices.size()];
+    detached.texcoords = mesh.texcoords ? new float[texcoords.size()] : nullptr;
+    detached.normals = mesh.normals ? new float[normals.size()] : nullptr;
+    detached.colors = mesh.colors ? new unsigned char[colors.size()] : nullptr;
     detached.indices = nullptr;
     detached.animVertices = nullptr;
     detached.animNormals = nullptr;
@@ -275,10 +275,10 @@ static bool detach_single_mesh_triangles(Mesh& mesh) {
         (mesh.texcoords && !detached.texcoords) ||
         (mesh.normals && !detached.normals) ||
         (mesh.colors && !detached.colors)) {
-        if (detached.vertices) free(detached.vertices);
-        if (detached.texcoords) free(detached.texcoords);
-        if (detached.normals) free(detached.normals);
-        if (detached.colors) free(detached.colors);
+        delete[] detached.vertices;
+        delete[] detached.texcoords;
+        delete[] detached.normals;
+        delete[] detached.colors;
         return false;
     }
 

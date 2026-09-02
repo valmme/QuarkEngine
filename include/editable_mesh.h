@@ -7,6 +7,8 @@ using namespace qc;
 
 struct EditableVertex {
     Vec3 position;
+    float u = 0.0f;
+    float v = 0.0f;
 };
 
 struct EditableTriangle {

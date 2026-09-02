@@ -163,7 +163,7 @@ bool open_material_viewer_for_path(const std::filesystem::path& material_path, s
     return true;
 }
 
-void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_path) {
+void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_path, int material_slot) {
     if (!entity || !std::filesystem::exists(mtl_path)) return;
 
     std::ifstream material_file(mtl_path);
@@ -172,9 +172,15 @@ void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_pa
     MeshComponent* mesh = entity->get_mesh_component();
     MaterialComponent* mat_comp = entity->get_material_component();
     if (!mesh || !mat_comp) return;
+    const auto applies_to_slot = [mesh, material_slot](int material_index) {
+        return material_slot < 0 || material_index == material_slot;
+    };
 
     Color albedo = WHITE;
     std::string texture_name;
+    std::string normal_texture_name;
+    std::string roughness_texture_name;
+    std::string metallic_texture_name;
     
     std::string line;
     while (std::getline(material_file, line)) {
@@ -197,14 +203,24 @@ void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_pa
         } 
         else if (type == "map_Kd") {
             if (!(stream >> texture_name)) texture_name.clear();
+        } else if (type == "map_Bump" || type == "bump" || type == "norm") {
+            if (!(stream >> normal_texture_name)) normal_texture_name.clear();
+        } else if (type == "map_Pr" || type == "map_roughness") {
+            if (!(stream >> roughness_texture_name)) roughness_texture_name.clear();
+        } else if (type == "map_Pm" || type == "map_metallic") {
+            if (!(stream >> metallic_texture_name)) metallic_texture_name.clear();
         }
     }
 
     material_file.close();
 
     mat_comp->color = albedo;
+    mat_comp->normal_texture_name = normal_texture_name;
+    mat_comp->roughness_texture_name = roughness_texture_name;
+    mat_comp->metallic_texture_name = metallic_texture_name;
     if (mesh->model.materials) {
         for (int i = 0; i < mesh->model.materialCount; i++) {
+            if (!applies_to_slot(i)) continue;
             mesh->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color = albedo;
         }
     }
@@ -220,12 +236,30 @@ void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_pa
                 
                 if (mesh->model.materials) {
                     for (int i = 0; i < mesh->model.materialCount; i++) {
+                        if (!applies_to_slot(i)) continue;
                         mesh->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].texture = tex;
                     }
                 }
             }
         }
     }
+
+    const auto load_map = [&](const std::string& path, int map_type) {
+        if (path.empty() || !mesh->model.materials) return;
+        const std::filesystem::path texture_path = mtl_path.parent_path() / path;
+        if (!std::filesystem::exists(texture_path)) return;
+        Texture2D texture = LoadTexture(texture_path.string().c_str());
+        if (texture.id == 0) return;
+        for (int i = 0; i < mesh->model.materialCount; i++) {
+            if (!applies_to_slot(i)) continue;
+            if (mesh->model.materials[i].maps)
+                mesh->model.materials[i].maps[map_type].texture = texture;
+        }
+    };
+
+    load_map(normal_texture_name, MATERIAL_MAP_NORMAL);
+    load_map(roughness_texture_name, MATERIAL_MAP_ROUGHNESS);
+    load_map(metallic_texture_name, MATERIAL_MAP_METALNESS);
     
     mat_comp->texture_name = mtl_path.string();
 }

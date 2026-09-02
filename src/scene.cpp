@@ -1,10 +1,30 @@
 #include "scene.h"
 #include "models.h"
+#include <algorithm>
 #include <unordered_set>
 
 Entity* Scene::get_selected() {
     if (selected < 0 || selected >= static_cast<int>(entities.size())) return nullptr;
     return &entities[selected];
+}
+
+bool Scene::is_selected(int entity_index) const {
+    return std::find(selected_entities.begin(), selected_entities.end(), entity_index) != selected_entities.end();
+}
+
+void Scene::select_entity(int entity_index, bool additive) {
+    if (entity_index < 0 || entity_index >= static_cast<int>(entities.size())) return;
+    if (!additive) selected_entities.clear();
+
+    auto it = std::find(selected_entities.begin(), selected_entities.end(), entity_index);
+    if (additive && it != selected_entities.end()) {
+        selected_entities.erase(it);
+        selected = selected_entities.empty() ? -1 : selected_entities.back();
+        return;
+    }
+
+    if (it == selected_entities.end()) selected_entities.push_back(entity_index);
+    selected = entity_index;
 }
 
 std::string Scene::make_unique_name(const std::string& base_name) const {

@@ -320,6 +320,14 @@ bool project_load(const std::string& folder_path, Scene& scene, Shader shader) {
             rebuild_mesh_from_editable(mesh->model, mesh->editable_mesh);
         }
 
+        for (int material_slot = 0;
+             material_slot < static_cast<int>(mat ? mat->material_slot_sources.size() : 0);
+             ++material_slot) {
+            const std::string& source = mat->material_slot_sources[material_slot];
+            if (!source.empty() && fs::exists(source))
+                load_material_to_entity(&e, source, material_slot);
+        }
+
         for (int i = 0; i < mesh->model.materialCount; i++) {
             mesh->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
             if (mat->texture.id != 0) {

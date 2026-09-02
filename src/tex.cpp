@@ -4,6 +4,10 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+#include <fstream>
+#include <iomanip>
+#include <random>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -58,6 +62,105 @@ bool is_image_file(const fs::path& p) {
     return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga";
 }
 
+namespace {
+
+std::string make_texture_guid() {
+    std::random_device device;
+    std::mt19937_64 generator(device());
+    std::uniform_int_distribution<unsigned long long> distribution;
+    std::ostringstream stream;
+    stream << std::hex << std::setfill('0') << std::setw(16) << distribution(generator)
+           << std::setw(16) << distribution(generator);
+    return stream.str();
+}
+
+bool parse_meta_value(const fs::path& texture_path, const char* key, std::string& value) {
+    std::ifstream file(texture_path.string() + ".meta");
+    if (!file.is_open()) return false;
+    std::string line;
+    const std::string prefix = std::string(key) + ":";
+    while (std::getline(file, line)) {
+        line.erase(0, line.find_first_not_of(" \t"));
+        if (line.rfind(prefix, 0) != 0) continue;
+        value = line.substr(prefix.size());
+        value.erase(0, value.find_first_not_of(" \t"));
+        if (value.empty()) continue;
+        return true;
+    }
+    return false;
+}
+
+}
+
+fs::path texture_path_from_meta(const fs::path& path) {
+    if (path.extension() == ".meta" && path.stem().extension() != ".meta") {
+        fs::path texture = path;
+        texture.replace_extension("");
+        return texture;
+    }
+    return path;
+}
+
+bool save_texture_meta(const fs::path& texture_path, const TextureMeta& meta) {
+    std::ofstream file(texture_path.string() + ".meta", std::ios::trunc);
+    if (!file.is_open()) return false;
+    file << "quark_texture_meta: 1\n"
+         << "asset_id: " << meta.guid << "\n"
+         << "image:\n"
+         << "  color_space: " << (meta.srgb_texture ? "srgb" : "linear") << "\n"
+         << "  alpha_mode: " << (meta.alpha_is_transparency ? "transparency" : "straight") << "\n"
+         << "  readable: " << (meta.is_readable ? "true" : "false") << "\n"
+         << "sampling:\n"
+         << "  mipmaps: " << (meta.enable_mip_map ? "true" : "false") << "\n"
+         << "  filter: " << (meta.filter_mode == 1 ? "linear" : "nearest") << "\n"
+         << "  wrap_u: " << (meta.wrap_u == 0 ? "repeat" : "clamp") << "\n"
+         << "  wrap_v: " << (meta.wrap_v == 0 ? "repeat" : "clamp") << "\n"
+         << "limits:\n"
+         << "  max_size: " << meta.max_texture_size << "\n"
+         << "  compression: " << meta.compression_quality << "\n"
+         << "sprite:\n"
+         << "  mode: " << meta.sprite_mode << "\n"
+         << "  type: " << meta.texture_type << "\n";
+    return file.good();
+}
+
+bool load_texture_meta(const fs::path& texture_path, TextureMeta& meta) {
+    if (!fs::exists(texture_path.string() + ".meta")) return false;
+    std::string value;
+    if (parse_meta_value(texture_path, "asset_id", value)) meta.guid = value;
+    if (meta.guid.empty()) parse_meta_value(texture_path, "guid", meta.guid);
+    if (meta.guid.empty()) meta.guid = make_texture_guid();
+    if (parse_meta_value(texture_path, "mipmaps", value)) meta.enable_mip_map = value == "true";
+    if (parse_meta_value(texture_path, "color_space", value)) meta.srgb_texture = value == "srgb";
+    if (parse_meta_value(texture_path, "readable", value)) meta.is_readable = value == "true";
+    if (parse_meta_value(texture_path, "filter", value)) meta.filter_mode = value == "linear" ? 1 : 0;
+    if (parse_meta_value(texture_path, "wrap_u", value)) meta.wrap_u = value == "repeat" ? 0 : 1;
+    if (parse_meta_value(texture_path, "wrap_v", value)) meta.wrap_v = value == "repeat" ? 0 : 1;
+    if (parse_meta_value(texture_path, "max_size", value)) { try { meta.max_texture_size = std::stoi(value); } catch (...) {} }
+    if (parse_meta_value(texture_path, "compression", value)) { try { meta.compression_quality = std::stoi(value); } catch (...) {} }
+    if (parse_meta_value(texture_path, "mode", value)) { try { meta.sprite_mode = std::stoi(value); } catch (...) {} }
+    if (parse_meta_value(texture_path, "type", value)) { try { meta.texture_type = std::stoi(value); } catch (...) {} }
+    if (parse_meta_value(texture_path, "alpha_mode", value)) meta.alpha_is_transparency = value == "transparency";
+    return true;
+}
+
+bool ensure_texture_meta(const fs::path& texture_path) {
+    if (!is_image_file(texture_path)) return false;
+    TextureMeta meta;
+    if (!load_texture_meta(texture_path, meta)) {
+        meta.guid = make_texture_guid();
+        return save_texture_meta(texture_path, meta);
+    }
+    return save_texture_meta(texture_path, meta);
+}
+
+void apply_texture_meta(Texture2D& texture, const TextureMeta& meta) {
+    if (texture.id == 0) return;
+    SetTextureFilter(texture, meta.filter_mode == 1 ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
+    SetTextureWrap(texture, meta.wrap_u == 0 ? TEXTURE_WRAP_REPEAT : TEXTURE_WRAP_CLAMP);
+    if (meta.enable_mip_map) GenTextureMipmaps(&texture);
+}
+
 void load_textures(std::string project_path) {
     fs::path resource_dir = fs::path(project_path) / "resources";
     if (!fs::exists(resource_dir)) fs::create_directories(resource_dir);
@@ -69,7 +172,10 @@ void load_textures(std::string project_path) {
     for (const auto& path : collect_resource_files(resource_dir)) {
         if (!is_image_file(path)) continue;
 
+        ensure_texture_meta(path);
         Texture2D tex = LoadTexture(path.string().c_str());
+        TextureMeta meta;
+        if (load_texture_meta(path, meta)) apply_texture_meta(tex, meta);
         texture_options.push_back({ fs::relative(path, resource_dir).generic_string(), tex });
     }
 }
@@ -328,20 +434,25 @@ void draw_collision_debug(Entity& entity) {
 }
 
 void draw_entity_with_texture(Entity& e) {
+    const TransformComponent* transform = e.get_transform_component();
+    if (!transform) return;
+
+    Mat4 local_transform = Mat4::translation(transform->position.x, transform->position.y, transform->position.z) *
+        Mat4::rotationX(transform->rotation.x * DEG2RAD) *
+        Mat4::rotationY(transform->rotation.y * DEG2RAD) *
+        Mat4::rotationZ(transform->rotation.z * DEG2RAD) *
+        Mat4::scale(transform->scale.x, transform->scale.y, transform->scale.z);
+    draw_entity_with_texture(e, local_transform);
+}
+
+void draw_entity_with_texture(Entity& e, const Mat4& world_transform) {
     refresh_entity_render_state(e);
     const MeshComponent* mesh = e.get_mesh_component();
     const MaterialComponent* mat = e.get_material_component();
-    const TransformComponent* transform = e.get_transform_component();
-    if (!mesh || !transform || !mat) return;
+    if (!mesh || !mat) return;
 
     PushMatrix();
-    Translate(transform->position.x, transform->position.y, transform->position.z);
-
-    Rotate(transform->rotation.x, Vec3(1.0f, 0.0f, 0.0f));
-    Rotate(transform->rotation.y, Vec3(0.0f, 1.0f, 0.0f));
-    Rotate(transform->rotation.z, Vec3(0.0f, 0.0f, 1.0f));
-
-    Scale(Vec3(transform->scale.x, transform->scale.y, transform->scale.z));
+    MultMatrix(world_transform);
 
     const bool edited_mesh_is_double_sided = entity_has_mesh_overrides(e) || mesh->mesh_triangles_detached;
     if (edited_mesh_is_double_sided) DisableBackfaceCulling();
@@ -449,6 +560,8 @@ void refresh_assets(std::string project_path) {
         a.filename = fs::relative(entry.path(), resource_dir).generic_string();
         a.is_directory = entry.is_directory(ec) && !ec;
         a.is_image = !a.is_directory && is_image_file(entry.path());
+
+        if (a.is_image) ensure_texture_meta(entry.path());
 
         asset_entries.push_back(a);
     }

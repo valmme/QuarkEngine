@@ -310,27 +310,14 @@ void ComponentUIHelper::draw_mesh_component(Editor& editor, Entity& entity, Mesh
                     m.vertices[i*3+2]
                 };
 
-                int found = -1;
-                for (int j = 0; j < (int)mesh->editable_mesh.vertices.size(); j++) {
-                    Vec3 existing = mesh->editable_mesh.vertices[j].position;
-                    if (fabsf(existing.x - pos.x) < 0.0001f &&
-                        fabsf(existing.y - pos.y) < 0.0001f &&
-                        fabsf(existing.z - pos.z) < 0.0001f) {
-                        found = j;
-                        break;
-                    }
+                remap[i] = (int)mesh->editable_mesh.vertices.size();
+                EditableVertex ev;
+                ev.position = pos;
+                if (m.texcoords) {
+                    ev.u = m.texcoords[i * 2 + 0];
+                    ev.v = m.texcoords[i * 2 + 1];
                 }
-
-                if (found >= 0) {
-                    remap[i] = found;
-                }
-
-                else {
-                    remap[i] = (int)mesh->editable_mesh.vertices.size();
-                    EditableVertex ev;
-                    ev.position = pos;
-                    mesh->editable_mesh.vertices.push_back(ev);
-                }
+                mesh->editable_mesh.vertices.push_back(ev);
             }
 
             for (int t = 0; t < m.triangleCount; t++) {
@@ -360,6 +347,9 @@ void ComponentUIHelper::draw_mesh_component(Editor& editor, Entity& entity, Mesh
 
                 mesh->editable_mesh.triangles.push_back(tri);
             }
+
+            if (g_selected_vertices.empty() && !mesh->editable_mesh.vertices.empty())
+                g_selected_vertices.push_back(0);
         }
     }
 
@@ -401,6 +391,25 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
 
     MaterialComponent* mat = entity.get_material_component();
     MeshComponent* mesh = entity.get_mesh_component();
+    if (!mat || !mesh) return;
+
+    ImGui::Text("Material slots: %d", mesh->model.materialCount);
+    for (int slot = 0; slot < mesh->model.materialCount; ++slot) {
+        const int material_index = slot;
+        if (material_index < 0 || material_index >= mesh->model.materialCount || !mesh->model.materials) continue;
+
+        const Material& material = mesh->model.materials[material_index];
+        const bool has_albedo = material.maps && material.maps[MATERIAL_MAP_ALBEDO].texture.valid;
+        const bool has_normal = material.maps && material.maps[MATERIAL_MAP_NORMAL].texture.valid;
+        const bool has_roughness = material.maps && material.maps[MATERIAL_MAP_ROUGHNESS].texture.valid;
+        const bool has_metallic = material.maps && material.maps[MATERIAL_MAP_METALNESS].texture.valid;
+        ImGui::Text("Slot %d: Albedo %s | Normal %s | Roughness %s | Metallic %s",
+            slot,
+            has_albedo ? "yes" : "no",
+            has_normal ? "yes" : "no",
+            has_roughness ? "yes" : "no",
+            has_metallic ? "yes" : "no");
+    }
 
     static std::vector<std::string> available_materials;
     static std::vector<std::string> material_display_names;
@@ -424,6 +433,42 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
         }
         
         materials_list_needs_update = false;
+    }
+
+    if (mesh->model.materialCount > 0) {
+        mat->material_slot_sources.resize(mesh->model.materialCount);
+        ImGui::Separator();
+        ImGui::Text("Material assignment by slot");
+        for (int slot = 0; slot < mesh->model.materialCount; ++slot) {
+            int slot_material_index = 0;
+            for (int i = 1; i < static_cast<int>(available_materials.size()); ++i) {
+                if (available_materials[i] == mat->material_slot_sources[slot]) {
+                    slot_material_index = i;
+                    break;
+                }
+            }
+
+            ImGui::PushID(slot);
+            ImGui::Text("Slot %d", slot);
+            ImGui::SameLine();
+            if (ImGui::Combo("##slot_material", &slot_material_index, material_names_cstr.data(),
+                             static_cast<int>(material_names_cstr.size()))) {
+                editor.save_state();
+                if (slot_material_index == 0) {
+                    if (mesh->model.materials && mesh->model.materials[slot].maps) {
+                        mesh->model.materials[slot].maps[MATERIAL_MAP_ALBEDO].texture = {0};
+                        mesh->model.materials[slot].maps[MATERIAL_MAP_NORMAL].texture = {0};
+                        mesh->model.materials[slot].maps[MATERIAL_MAP_ROUGHNESS].texture = {0};
+                        mesh->model.materials[slot].maps[MATERIAL_MAP_METALNESS].texture = {0};
+                    }
+                    mat->material_slot_sources[slot].clear();
+                } else if (slot_material_index < static_cast<int>(available_materials.size())) {
+                    load_material_to_entity(&entity, available_materials[slot_material_index], slot);
+                    mat->material_slot_sources[slot] = available_materials[slot_material_index];
+                }
+            }
+            ImGui::PopID();
+        }
     }
 
     selected_material_index = 0;

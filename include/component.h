@@ -130,6 +130,10 @@ public:
     Texture2D texture = {0};
     TextureSource texture_source = TEXTURE_NONE;
     std::string texture_name;
+    std::string normal_texture_name;
+    std::string roughness_texture_name;
+    std::string metallic_texture_name;
+    std::vector<std::string> material_slot_sources;
 
     Color color = WHITE;
     Color outline_color = LIGHTGRAY;
@@ -157,6 +161,10 @@ public:
 
         json["texture_source"] = static_cast<int>(texture_source);
         json["texture_name"] = texture_name;
+        json["normal_texture_name"] = normal_texture_name;
+        json["roughness_texture_name"] = roughness_texture_name;
+        json["metallic_texture_name"] = metallic_texture_name;
+        json["material_slot_sources"] = material_slot_sources;
         json["texture_stretch"] = texture_stretch;
 
         json["auto_uv"] = auto_uv;
@@ -178,6 +186,10 @@ public:
 
         if (json.contains("texture_source")) texture_source = static_cast<TextureSource>(json["texture_source"].get<int>());
         if (json.contains("texture_name")) texture_name = json["texture_name"];
+        if (json.contains("normal_texture_name")) normal_texture_name = json["normal_texture_name"];
+        if (json.contains("roughness_texture_name")) roughness_texture_name = json["roughness_texture_name"];
+        if (json.contains("metallic_texture_name")) metallic_texture_name = json["metallic_texture_name"];
+        if (json.contains("material_slot_sources")) material_slot_sources = json["material_slot_sources"].get<std::vector<std::string>>();
         if (json.contains("texture_stretch")) texture_stretch = json["texture_stretch"];
         
         if (json.contains("auto_uv")) auto_uv = json["auto_uv"];

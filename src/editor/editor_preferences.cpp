@@ -34,6 +34,7 @@ static void read_preferences(const json& data) {
     if (preferences->contains("gizmo_rotation_snap")) g_editor_preferences.gizmo_rotation_snap = (*preferences)["gizmo_rotation_snap"].get<float>();
     if (preferences->contains("gizmo_scale_snap")) g_editor_preferences.gizmo_scale_snap = (*preferences)["gizmo_scale_snap"].get<float>();
     if (preferences->contains("show_bounding_boxes")) g_editor_preferences.show_bounding_boxes = (*preferences)["show_bounding_boxes"].get<bool>();
+    if (preferences->contains("show_selection_visualization")) g_editor_preferences.show_selection_visualization = (*preferences)["show_selection_visualization"].get<bool>();
     if (preferences->contains("selection_red")) g_editor_preferences.selection_red = (*preferences)["selection_red"].get<int>();
     if (preferences->contains("selection_green")) g_editor_preferences.selection_green = (*preferences)["selection_green"].get<int>();
     if (preferences->contains("selection_blue")) g_editor_preferences.selection_blue = (*preferences)["selection_blue"].get<int>();
@@ -119,6 +120,7 @@ void save_editor_preferences() {
         {"gizmo_rotation_snap", g_editor_preferences.gizmo_rotation_snap},
         {"gizmo_scale_snap", g_editor_preferences.gizmo_scale_snap},
         {"show_bounding_boxes", g_editor_preferences.show_bounding_boxes},
+        {"show_selection_visualization", g_editor_preferences.show_selection_visualization},
         {"selection_red", g_editor_preferences.selection_red},
         {"selection_green", g_editor_preferences.selection_green},
         {"selection_blue", g_editor_preferences.selection_blue},

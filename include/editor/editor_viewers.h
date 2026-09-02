@@ -18,7 +18,7 @@ void rebuild_material_preview_mesh();
 void save_material_to_file(Editor& editor);
 void load_textures_in_directory();
 void load_material_texture(const std::string& texture_name);
-void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_path);
+void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_path, int material_slot = -1);
 std::vector<std::string> get_all_materials_in_project();
 bool open_material_viewer_for_path(const std::filesystem::path& material_path, std::unordered_map<std::string, Texture>& texture_cache);
 

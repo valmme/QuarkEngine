@@ -16,6 +16,8 @@
 #include "imgui_internal.h"
 #include <cstring>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <vector>
 #include "language_manager.h"
 #include "editor/editor_preferences.h"
@@ -39,6 +41,7 @@ bool g_is_scene_active = false;
 
 ImVec2 g_scene_window_pos = { 0, 0 };
 ImVec2 g_scene_window_size = { 0, 0 };
+static const Scene* g_active_scene = nullptr;
 
 MeshEditState g_mesh_edit_state;
 
@@ -154,13 +157,44 @@ void open_url(const char* url) {
     #endif
 }
 
-Mat4 compose_entity_transform_Mat4(const Entity& entity) {
+static Mat4 compose_local_entity_transform_Mat4(const Entity& entity) {
     const TransformComponent* transform = entity.get_transform_component();
     if (!transform) return Mat4Identity();
     Mat4 matScale = Mat4Scale(transform->scale.x, transform->scale.y, transform->scale.z);
     Mat4 matRotation = Mat4RotateXYZ({transform->rotation.x * DEG2RAD, transform->rotation.y * DEG2RAD, transform->rotation.z * DEG2RAD});
     Mat4 matTranslation = Mat4Translate(transform->position.x, transform->position.y, transform->position.z);
     return Mat4Multiply(Mat4Multiply(matTranslation, matRotation), matScale);
+}
+
+static Mat4 compose_entity_world_transform_Mat4(const Scene& scene, int entity_index, std::vector<int>& stack) {
+    if (entity_index < 0 || entity_index >= static_cast<int>(scene.entities.size())) return Mat4Identity();
+    if (std::find(stack.begin(), stack.end(), entity_index) != stack.end())
+        return compose_local_entity_transform_Mat4(scene.entities[entity_index]);
+
+    stack.push_back(entity_index);
+    const Entity& entity = scene.entities[entity_index];
+    Mat4 world = compose_local_entity_transform_Mat4(entity);
+    if (entity.parent_id >= 0 && entity.parent_id < static_cast<int>(scene.entities.size()))
+        world = Mat4Multiply(compose_entity_world_transform_Mat4(scene, entity.parent_id, stack), world);
+    stack.pop_back();
+    return world;
+}
+
+Mat4 compose_entity_transform_Mat4(const Entity& entity) {
+    if (!g_active_scene) return compose_local_entity_transform_Mat4(entity);
+    for (int entity_index = 0; entity_index < static_cast<int>(g_active_scene->entities.size()); ++entity_index) {
+        if (&g_active_scene->entities[entity_index] == &entity) {
+            std::vector<int> stack;
+            return compose_entity_world_transform_Mat4(*g_active_scene, entity_index, stack);
+        }
+    }
+    return compose_local_entity_transform_Mat4(entity);
+}
+
+static Mat4 compose_mesh_world_transform(const Entity& entity) {
+    const MeshComponent* mesh = entity.get_mesh_component();
+    if (!mesh) return compose_entity_transform_Mat4(entity);
+    return Mat4Multiply(compose_entity_transform_Mat4(entity), mesh->model.transform);
 }
 
 Vec3 ray_plane_hit(Ray ray) {
@@ -184,6 +218,7 @@ void sync_mesh_edit_state(const Editor& editor) {
         g_mesh_edit_state.triangle_index = 0;
         g_mesh_edit_state.vertex_corner = 0;
         g_mesh_edit_state.was_using_gizmo = false;
+        g_selected_vertices.clear();
     }
 }
 
@@ -216,7 +251,7 @@ Vec3 get_mesh_vertex_local_position(const Entity& entity, int mesh_index, int ve
 }
 
 Vec3 get_mesh_vertex_world_position(const Entity& entity, int mesh_index, int vertex_index) {
-    const Mat4 transform = compose_entity_transform_Mat4(entity);
+    const Mat4 transform = compose_mesh_world_transform(entity);
     return Vec3Transform(get_mesh_vertex_local_position(entity, mesh_index, vertex_index), transform);
 }
 
@@ -253,7 +288,7 @@ bool set_mesh_vertex_local_position(Entity& entity, int mesh_index, int vertex_i
 }
 
 bool set_mesh_vertex_world_position(Entity& entity, int mesh_index, int vertex_index, const Vec3& world_position) {
-    const Mat4 inverse_transform = Mat4Invert(compose_entity_transform_Mat4(entity));
+    const Mat4 inverse_transform = Mat4Invert(compose_mesh_world_transform(entity));
     const Vec3 local_position = Vec3Transform(world_position, inverse_transform);
     return set_mesh_vertex_local_position(entity, mesh_index, vertex_index, local_position);
 }
@@ -272,7 +307,7 @@ bool pick_mesh_triangle(
     const Mesh& mesh = mesh_component->model.meshes[mesh_index];
     if (!mesh.vertices || mesh.triangleCount <= 0) return false;
 
-    const Mat4 transform = compose_entity_transform_Mat4(entity);
+    const Mat4 transform = compose_mesh_world_transform(entity);
     float best_distance = FLT_MAX;
     int best_triangle = -1;
     int best_corner = 0;
@@ -437,6 +472,8 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
         g_editor_preferences.gizmo_scale_snap,
         g_editor_preferences.gizmo_scale_snap
     };
+    const bool gizmo_snap_enabled = g_editor_preferences.gizmo_snap_enabled ||
+        IsKeyDown(KeyboardKey::LeftControl) || IsKeyDown(KeyboardKey::RightControl);
 
     Mat4 view = Mat4::lookAt(
         camera.get_camera().position,
@@ -496,7 +533,7 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
                 ImGuizmo::WORLD,
                 transform_Mat4,
                 nullptr,
-                g_editor_preferences.gizmo_snap_enabled ? translation_snap : nullptr
+                gizmo_snap_enabled ? translation_snap : nullptr
             );
 
             if (ImGuizmo::IsUsing() && !g_mesh_edit_state.was_using_gizmo) {
@@ -547,7 +584,7 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
         ImGuizmo::WORLD,
         transform_Mat4,
         nullptr,
-        g_editor_preferences.gizmo_snap_enabled
+        gizmo_snap_enabled
             ? (editor_internal::gizmo_mode == ImGuizmo::TRANSLATE ? translation_snap :
                editor_internal::gizmo_mode == ImGuizmo::ROTATE ? rotation_snap : scale_snap)
             : nullptr
@@ -572,6 +609,23 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
         transform->rotation = { next_rotation[0], next_rotation[1], next_rotation[2] };
         transform->scale = { next_scale[0], next_scale[1], next_scale[2] };
 
+        const Vec3 position_delta = transform->position - Vec3{translation[0], translation[1], translation[2]};
+        if (editor.scene.selected_entities.size() > 1) {
+            for (int selected_index : editor.scene.selected_entities) {
+                if (selected_index == editor.scene.selected ||
+                    selected_index < 0 || selected_index >= static_cast<int>(editor.scene.entities.size())) continue;
+                Entity& selected_entity = editor.scene.entities[selected_index];
+                TransformComponent* selected_transform = selected_entity.get_transform_component();
+                if (!selected_transform) continue;
+                selected_transform->position = selected_transform->position + position_delta;
+                mark_entity_bounds_dirty(&selected_entity);
+                if (MaterialComponent* selected_material = selected_entity.get_material_component();
+                    selected_material && !selected_material->texture_stretch) {
+                    mark_entity_uv_dirty(&selected_entity);
+                }
+            }
+        }
+
         MaterialComponent* mat = entity->get_material_component();
         if (mat && !mat->texture_stretch) mark_entity_uv_dirty(entity);
     }
@@ -581,11 +635,18 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
 }
 
 static Vec2 world_to_scene_screen(const Vec3& world, const Camera3D& camera) {
-    float rt_w = (float)GetScreenWidth();
-    float rt_h = (float)GetScreenHeight();
-    Vec3 fb = GetWorldToScreen(world, camera);
-    float nx = fb.x / rt_w;
-    float ny = fb.y / rt_h;
+    const Mat4 view = Mat4::lookAt(camera.position, camera.target, camera.up);
+    const Mat4 projection = Mat4::perspective(
+        camera.fovy * DEG2RAD,
+        g_scene_window_size.x / g_scene_window_size.y,
+        0.1f,
+        1000.0f
+    );
+    const Vec4 clip = projection * (view * Vec4{world.x, world.y, world.z, 1.0f});
+    if (fabsf(clip.w) <= 0.000001f) return {g_scene_window_pos.x, g_scene_window_pos.y};
+
+    const float nx = clip.x / clip.w * 0.5f + 0.5f;
+    const float ny = -clip.y / clip.w * 0.5f + 0.5f;
     return {
         g_scene_window_pos.x + nx * g_scene_window_size.x,
         g_scene_window_pos.y + ny * g_scene_window_size.y
@@ -881,7 +942,7 @@ bool polygon_create_vertex(Entity& entity, const Vec3& world_position) {
     if (!mesh) return false;
 
     EditableVertex vert;
-    vert.position = world_position;
+    vert.position = Vec3Transform(world_position, Mat4Invert(compose_mesh_world_transform(entity)));
     mesh->editable_mesh.vertices.push_back(vert);
     return true;
 }
@@ -901,16 +962,23 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
     if (!mesh || !mesh->vertex_gizmo) return;
 
     EditableMesh& e_mesh = mesh->editable_mesh;
+    if (g_selected_vertices.empty() && !e_mesh.vertices.empty())
+        g_selected_vertices.push_back(0);
+
     ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const Mat4 mesh_world_transform = compose_mesh_world_transform(*entity);
+    const auto to_world = [&mesh_world_transform](const Vec3& local_position) {
+        return Vec3Transform(local_position, mesh_world_transform);
+    };
 
     for (const auto& tri : e_mesh.triangles) {
         if (tri.a >= (int)e_mesh.vertices.size()) continue;
         if (tri.b >= (int)e_mesh.vertices.size()) continue;
         if (tri.c >= (int)e_mesh.vertices.size()) continue;
 
-        Vec2 p1 = world_to_scene_screen(e_mesh.vertices[tri.a].position, camera);
-        Vec2 p2 = world_to_scene_screen(e_mesh.vertices[tri.b].position, camera);
-        Vec2 p3 = world_to_scene_screen(e_mesh.vertices[tri.c].position, camera);
+        Vec2 p1 = world_to_scene_screen(to_world(e_mesh.vertices[tri.a].position), camera);
+        Vec2 p2 = world_to_scene_screen(to_world(e_mesh.vertices[tri.b].position), camera);
+        Vec2 p3 = world_to_scene_screen(to_world(e_mesh.vertices[tri.c].position), camera);
 
         draw->AddLine({p1.x,p1.y}, {p2.x,p2.y}, IM_COL32(0,255,0,255), 2.0f);
         draw->AddLine({p2.x,p2.y}, {p3.x,p3.y}, IM_COL32(0,255,0,255), 2.0f);
@@ -918,7 +986,7 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
     }
 
     for (int i = 0; i < (int)e_mesh.vertices.size(); i++) {
-        Vec2 screen = world_to_scene_screen(e_mesh.vertices[i].position, camera);
+        Vec2 screen = world_to_scene_screen(to_world(e_mesh.vertices[i].position), camera);
 
         bool selected = false;
         for (int si : g_selected_vertices)
@@ -933,18 +1001,19 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
     if (g_selected_vertices.size() == 1 && g_poly_mode != POLY_CREATE) {
         int sel = g_selected_vertices[0];
         if (sel >= 0 && sel < (int)e_mesh.vertices.size()) {
-            Vec3 world_pos = e_mesh.vertices[sel].position;
+            Vec3 world_pos = to_world(e_mesh.vertices[sel].position);
 
             float view_Mat4[16] = {};
             float projection_Mat4[16] = {};
             float transform_Mat4[16] = {};
 
-            Mat4 view = Mat4Transpose(GetCameraMat4(camera));
-            Mat4 projection = Mat4Transpose(Mat4PerspectiveVulkan(
+            Mat4 view = Mat4::lookAt(camera.position, camera.target, camera.up);
+            Mat4 projection = Mat4::perspective(
                 camera.fovy * DEG2RAD,
                 g_scene_window_size.x / g_scene_window_size.y,
-                0.1f, 1000.0f
-            ));
+                0.1f,
+                1000.0f
+            );
 
             memcpy(view_Mat4, &view, sizeof(view_Mat4));
             memcpy(projection_Mat4, &projection, sizeof(projection_Mat4));
@@ -958,7 +1027,22 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
             ImGuizmo::RecomposeMatrixFromComponents(t, r, s, transform_Mat4);
 
             static bool was_using_poly_gizmo = false;
-            ImGuizmo::Manipulate(view_Mat4, projection_Mat4, ImGuizmo::TRANSLATE, ImGuizmo::WORLD, transform_Mat4);
+            const bool gizmo_snap_enabled = g_editor_preferences.gizmo_snap_enabled ||
+                IsKeyDown(KeyboardKey::LeftControl) || IsKeyDown(KeyboardKey::RightControl);
+            const float snap[3] = {
+                g_editor_preferences.gizmo_translation_snap,
+                g_editor_preferences.gizmo_translation_snap,
+                g_editor_preferences.gizmo_translation_snap
+            };
+            ImGuizmo::Manipulate(
+                view_Mat4,
+                projection_Mat4,
+                ImGuizmo::TRANSLATE,
+                ImGuizmo::WORLD,
+                transform_Mat4,
+                nullptr,
+                gizmo_snap_enabled ? snap : nullptr
+            );
 
             if (ImGuizmo::IsUsing() && !was_using_poly_gizmo)
                 editor.save_state();
@@ -966,7 +1050,10 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
             if (ImGuizmo::IsUsing()) {
                 float nt[3]={}, nr[3]={}, ns[3]={};
                 ImGuizmo::DecomposeMatrixToComponents(transform_Mat4, nt, nr, ns);
-                e_mesh.vertices[sel].position = {nt[0], nt[1], nt[2]};
+                e_mesh.vertices[sel].position = Vec3Transform(
+                    {nt[0], nt[1], nt[2]},
+                    Mat4Invert(mesh_world_transform)
+                );
                 rebuild_mesh_from_editable(mesh->model, e_mesh);
                 mark_entity_bounds_dirty(entity);
             }
@@ -985,7 +1072,7 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
         int best_vert = -1;
 
         for (int i = 0; i < (int)e_mesh.vertices.size(); i++) {
-            Vec2 sp = world_to_scene_screen(e_mesh.vertices[i].position, camera);
+            Vec2 sp = world_to_scene_screen(to_world(e_mesh.vertices[i].position), camera);
             float dx = mouse.x - sp.x, dy = mouse.y - sp.y;
             float d = sqrtf(dx*dx + dy*dy);
             if (d < best_dist) { best_dist = d; best_vert = i; }
@@ -1016,9 +1103,9 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
                 if (tri.b >= (int)e_mesh.vertices.size()) continue;
                 if (tri.c >= (int)e_mesh.vertices.size()) continue;
 
-                Vec3 va = e_mesh.vertices[tri.a].position;
-                Vec3 vb = e_mesh.vertices[tri.b].position;
-                Vec3 vc = e_mesh.vertices[tri.c].position;
+                Vec3 va = to_world(e_mesh.vertices[tri.a].position);
+                Vec3 vb = to_world(e_mesh.vertices[tri.b].position);
+                Vec3 vc = to_world(e_mesh.vertices[tri.c].position);
 
                 RayCollision hit = GetRayCollisionTriangle(ray, va, vb, vc);
                 if (!hit.hit || hit.distance >= best_hit_dist) continue;
@@ -1064,9 +1151,9 @@ void draw_polygon_editor(Editor& editor, Camera3D camera) {
             if (tri.c >= (int)e_mesh.vertices.size()) continue;
 
             RayCollision hit = GetRayCollisionTriangle(ray,
-                e_mesh.vertices[tri.a].position,
-                e_mesh.vertices[tri.b].position,
-                e_mesh.vertices[tri.c].position);
+                to_world(e_mesh.vertices[tri.a].position),
+                to_world(e_mesh.vertices[tri.b].position),
+                to_world(e_mesh.vertices[tri.c].position));
 
             if (hit.hit) { place_pos = hit.point; hit_mesh = true; break; }
         }
@@ -1212,6 +1299,7 @@ static void draw_bottom_status_bar() {
 }
 
 void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* plugin_ctx) {
+    g_active_scene = &editor.scene;
     using namespace editor_internal;
 
     ImVec4& selection_style = ImGui::GetStyle().Colors[ImGuiCol_HeaderActive];
@@ -1228,6 +1316,16 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
     ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
 
     ImGui::DockSpaceOverViewport(dockspace_id, ImGui::GetMainViewport(), dockspace_flags);
+
+    static bool checked_layout_marker = false;
+    const char* ini_filename = ImGui::GetIO().IniFilename;
+    const std::filesystem::path ini_path = ini_filename ? ini_filename : "imgui.ini";
+    const std::filesystem::path layout_marker = ini_path.parent_path() / ".quark_layout_initialized";
+    if (!checked_layout_marker && !std::filesystem::exists(layout_marker)) {
+        reset_editor_layout(dockspace_id);
+        std::ofstream(layout_marker).close();
+    }
+    checked_layout_marker = true;
 
     if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
         reset_editor_layout(dockspace_id);
@@ -1331,35 +1429,54 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
         ImGui::Begin(lang.word("hierarchy"), &show_hierarchy);
         editor.plugin_manager->draw_ui_region(UI_HIERARCHY, *plugin_ctx);
 
+        if (editor.scene.selected_entities.empty() && editor.scene.selected >= 0)
+            editor.scene.select_entity(editor.scene.selected, false);
+
+    auto accept_entity_drop = [&](int target_index) {
+        if (!ImGui::BeginDragDropTarget()) return;
+
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
+            if (payload->IsDelivery() && payload->DataSize == sizeof(int)) {
+                const int dropped_index = *static_cast<const int*>(payload->Data);
+                if (dropped_index != target_index) {
+                    editor.save_state();
+                    move_entity_to_parent(editor.scene, dropped_index, target_index);
+                }
+            }
+        }
+
+        if (ImGui::IsDragDropPayloadBeingAccepted()) {
+            ImGui::GetWindowDrawList()->AddRect(
+                ImGui::GetItemRectMin(),
+                ImGui::GetItemRectMax(),
+                IM_COL32(80, 180, 255, 255),
+                2.0f,
+                0,
+                2.0f
+            );
+        }
+
+        ImGui::EndDragDropTarget();
+    };
+
     auto draw_entity_item = [&](int entity_index) {
         Entity& entity = editor.scene.entities[entity_index];
-        const bool selected = editor.scene.selected == entity_index;
+        const bool selected = editor.scene.is_selected(entity_index);
         
         ImGui::PushID(entity_index);
         
         if (ImGui::Selectable(entity.name.c_str(), selected)) {
-            editor.scene.selected = entity_index;
+            const bool ctrl = ImGui::GetIO().KeyCtrl;
+            editor.scene.select_entity(entity_index, ctrl);
         }
         
         if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
             ImGui::SetDragDropPayload("ENTITY_INDEX", &entity_index, sizeof(int));
-            ImGui::SetDragDropPayload("ENTITY_TO_ASSETS", &entity_index, sizeof(int));
             ImGui::Text("%s", entity.name.c_str());
             ImGui::EndDragDropSource();
         }
-        
-        if (entity.is_group) {
-            if (ImGui::BeginDragDropTarget()) {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
-                    int dropped_index = *(const int*)payload->Data;
-                    if (dropped_index != entity_index) {
-                        editor.save_state();
-                        move_entity_to_parent(editor.scene, dropped_index, entity_index);
-                    }
-                }
-                ImGui::EndDragDropTarget();
-            }
-        }
+
+        accept_entity_drop(entity_index);
         
         if (ImGui::BeginPopupContextItem(TextFormat("context_%d", entity.id))) {
             if (ImGui::MenuItem(lang.word("delete"))) {
@@ -1414,7 +1531,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
             
             if (child.is_group) {
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
-                if (editor.scene.selected == child_idx) {
+                if (editor.scene.is_selected(child_idx)) {
                     flags |= ImGuiTreeNodeFlags_Selected;
                 }
                 
@@ -1426,16 +1543,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                     ImGui::EndDragDropSource();
                 }
                 
-                if (ImGui::BeginDragDropTarget()) {
-                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
-                        int dropped_index = *(const int*)payload->Data;
-                        if (dropped_index != child_idx) {
-                            editor.save_state();
-                            move_entity_to_parent(editor.scene, dropped_index, child_idx);
-                        }
-                    }
-                    ImGui::EndDragDropTarget();
-                }
+                accept_entity_drop(child_idx);
                 
                 if (ImGui::BeginPopupContextItem(TextFormat("group_context_%d", child.id))) {
                     if (ImGui::MenuItem(lang.word("delete"))) {
@@ -1480,7 +1588,8 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 
                 ImGui::PushID(child_idx);
                 if (ImGui::IsItemClicked()) {
-                    editor.scene.selected = child_idx;
+                    const bool ctrl = ImGui::GetIO().KeyCtrl;
+                    editor.scene.select_entity(child_idx, ctrl);
                 }
                 ImGui::PopID();
                 
@@ -1490,11 +1599,46 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 }
             } else {
                 draw_entity_item(child_idx);
+                const auto nested_children = get_entity_children(editor.scene, child_idx);
+                if (!nested_children.empty()) {
+                    ImGui::Indent();
+                    draw_entity_tree(child_idx);
+                    ImGui::Unindent();
+                }
             }
         }
     };
     
     draw_entity_tree(-1);
+
+    const ImVec2 hierarchy_space = ImGui::GetContentRegionAvail();
+    if (hierarchy_space.x > 1.0f && hierarchy_space.y > 1.0f) {
+        ImGui::InvisibleButton("HierarchyRootDropZone", hierarchy_space);
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
+                if (payload->IsDelivery() && payload->DataSize == sizeof(int)) {
+                    const int dropped_index = *static_cast<const int*>(payload->Data);
+                    if (dropped_index >= 0 && dropped_index < static_cast<int>(editor.scene.entities.size()) &&
+                        editor.scene.entities[dropped_index].parent_id != -1) {
+                        editor.save_state();
+                        move_entity_to_parent(editor.scene, dropped_index, -1);
+                    }
+                }
+            }
+
+            if (ImGui::IsDragDropPayloadBeingAccepted()) {
+                ImGui::GetWindowDrawList()->AddRect(
+                    ImGui::GetItemRectMin(),
+                    ImGui::GetItemRectMax(),
+                    IM_COL32(80, 180, 255, 255),
+                    2.0f,
+                    0,
+                    2.0f
+                );
+            }
+            ImGui::EndDragDropTarget();
+        }
+    }
 
     if (ImGui::BeginPopupContextWindow("HierarchyContext", ImGuiPopupFlags_NoOpenOverItems)) {
         if (ImGui::BeginMenu(lang.word("create"))) {
@@ -1549,34 +1693,25 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
             ImGui::Separator();
             ImGui::Spacing();
             
-            if (ImGui::BeginTabBar("EntityInspectorTabs")) {
-                if (ImGui::BeginTabItem(lang.word("entity"))) {
-                    char inspector_name[128] = {};
-                    const size_t copied = entity->name.copy(inspector_name, sizeof(inspector_name) - 1);
-                    inspector_name[copied] = '\0';
+            char inspector_name[128] = {};
+            const size_t copied = entity->name.copy(inspector_name, sizeof(inspector_name) - 1);
+            inspector_name[copied] = '\0';
 
-                    static std::string last_name;
-                    if (ImGui::InputText(lang.word("name"), inspector_name, IM_ARRAYSIZE(inspector_name))) {
-                        if (last_name != inspector_name) {
-                            editor.save_state();
-                            assign_entity_name(*entity, inspector_name);
-                            last_name = inspector_name;
-                        }
-                    } else {
-                        last_name = inspector_name;
-                    }
-                    
-                    ImGui::EndTabItem();
+            static std::string last_name;
+            if (ImGui::InputText(lang.word("name"), inspector_name, IM_ARRAYSIZE(inspector_name))) {
+                if (last_name != inspector_name) {
+                    editor.save_state();
+                    assign_entity_name(*entity, inspector_name);
+                    last_name = inspector_name;
                 }
-                
-                if (ImGui::BeginTabItem(lang.word("components"))) {
-                    ImGui::Spacing();
-                    ComponentUIHelper::draw_entity_inspector(editor, *entity, shader);
-                    ImGui::EndTabItem();
-                }
-                
-                ImGui::EndTabBar();
+            } else {
+                last_name = inspector_name;
             }
+
+            ImGui::Spacing();
+            ComponentUIHelper::draw_entity_inspector(editor, *entity, shader);
+        } else {
+            draw_selected_texture_inspector(editor);
         }
 
         ImGui::End();
@@ -1663,7 +1798,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
             "Unknown"
         );
         ImGui::Separator();
-        ImGui::Text(lang.word("quarkcore_version"), QC_VERSION_STRING);
+        ImGui::Text(lang.word("quarkcore_version"), QC_VERSION_STRING, "stable");
         ImGui::Text(lang.word("imgui_version"), IMGUI_VERSION);
         ImGui::Spacing();
 
@@ -1800,6 +1935,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 }
                 preferences_changed |= ImGui::Checkbox("Show light helpers", &g_editor_preferences.show_light_helpers);
                 preferences_changed |= ImGui::Checkbox("Show camera frustum", &g_editor_preferences.show_cameras);
+                preferences_changed |= ImGui::Checkbox("Show selection visualization", &g_editor_preferences.show_selection_visualization);
                 preferences_changed |= ImGui::SliderInt("Asset preview size", &g_editor_preferences.asset_preview_size, 32, 128);
                 const char* asset_filter_names[] = { "All", "Images", "Models", "Materials" };
                 ImGui::Text("Asset type filter");

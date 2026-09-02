@@ -137,5 +137,6 @@
     "vertices":  "Вершини",
     "triangles":  "Трикутники",
     "drag_n_drop_material":  "Drag the material to an entity",
-    "open_file_explorer":  "Open in File Explorer"
+    "open_file_explorer":  "Open in File Explorer",
+    "text":  "3D Text"
 }

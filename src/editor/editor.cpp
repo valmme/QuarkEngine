@@ -62,6 +62,7 @@ void restore_scene_entity_models(Scene& scene) {
 static SceneState capture_scene_state(const Scene& scene) {
     SceneState state;
     state.selected = scene.selected;
+    state.selected_entities = scene.selected_entities;
 
     for (auto entity : scene.entities) {
         MeshComponent* mesh = entity.get_mesh_component();
@@ -94,6 +95,7 @@ void Editor::undo() {
 
     scene.entities = previous.entities;
     scene.selected = previous.selected;
+    scene.selected_entities = previous.selected_entities;
     editor_internal::restore_scene_entity_models(scene);
 }
 
@@ -109,6 +111,7 @@ void Editor::redo() {
 
     scene.entities = next.entities;
     scene.selected = next.selected;
+    scene.selected_entities = next.selected_entities;
     editor_internal::restore_scene_entity_models(scene);
 }
 

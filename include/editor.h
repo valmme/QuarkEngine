@@ -11,12 +11,14 @@
 struct SceneState {
     std::vector<Entity> entities;
     int selected;
+    std::vector<int> selected_entities;
 };
 
 struct Editor {
     Scene scene;
     std::string project_path = "projects/TestProject";
     int selected_asset_index = -1;
+    std::string selected_asset_name;
     bool scene_dirty = false;
 
     std::stack<SceneState> undo_stack;

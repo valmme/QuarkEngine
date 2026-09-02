@@ -28,7 +28,7 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", QUARK_COMPANY_NAME "\0"
-            VALUE "FileDescription", "Quark Engine editor and runtime\0"
+            VALUE "FileDescription", "Quark Engine editor\0"
             VALUE "FileVersion", QUARK_VERSION_STRING "\0"
             VALUE "InternalName", "QuarkEngine.exe\0"
             VALUE "LegalCopyright", QUARK_COPYRIGHT "\0"

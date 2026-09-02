@@ -8,6 +8,7 @@ option(BUILD_ENGINE "Build Quark Engine" ON)
 option(BUILD_PLUGIN "Build Plugin" OFF)
 
 set(QC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS    ON CACHE BOOL "" FORCE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -54,6 +55,7 @@ target_include_directories(imgui PUBLIC
 
 target_link_libraries(imgui PUBLIC
     SDL3::SDL3
+    QuarkCore-OpenGL
     QuarkCore-Vulkan
     Vulkan::Vulkan
 )
@@ -72,9 +74,9 @@ endif()
 
 set_target_properties(imgui PROPERTIES
     PREFIX ""
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
 )
 
 if(APPLE)
@@ -126,6 +128,12 @@ if(BUILD_ENGINE)
 
     add_executable(${PROJECT_NAME} ${SOURCE_FILES} ${EDITOR_FILES})
 
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+        ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+    )
+
     if(WIN32)
         target_sources(${PROJECT_NAME} PRIVATE QuarkEngine.rc)
     endif()
@@ -148,6 +156,7 @@ if(BUILD_ENGINE)
     endif()
 
     target_link_libraries(${PROJECT_NAME} PRIVATE
+        QuarkCore-OpenGL
         QuarkCore-Vulkan
         imgui
     )
@@ -181,12 +190,12 @@ if(BUILD_ENGINE)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/assets
-            ${CMAKE_BINARY_DIR}/bin/assets
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
     )
 
     if(WIN32)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>
     )
 
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
