@@ -72,11 +72,15 @@ jobs:
       - name: Collect artifacts (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
+          src="build/bin/${{ matrix.build_type }}"
+          if [ ! -f "$src/QuarkEngine" ]; then
+            src="build/bin"
+          fi
           mkdir -p dist
-          cp build/bin/QuarkEngine dist/
-          cp -P build/bin/*.so*     dist/ 2>/dev/null || true
-          cp -P build/bin/*.dylib*  dist/ 2>/dev/null || true
-          cp -r build/bin/assets    dist/assets 2>/dev/null || true
+          cp "$src/QuarkEngine" dist/
+          cp -P "$src"/*.so*     dist/ 2>/dev/null || true
+          cp -P "$src"/*.dylib*  dist/ 2>/dev/null || true
+          cp -r "$src/assets"    dist/assets 2>/dev/null || true
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'

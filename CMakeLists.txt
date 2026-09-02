@@ -208,6 +208,7 @@ if(BUILD_ENGINE)
                 $<TARGET_FILE:assimp::assimp>
                 $<TARGET_FILE:ZLIB::ZLIB>
                 $<TARGET_FILE:freetype>
+                $<IF:$<CONFIG:Debug>,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/OpenAL/lib/debug/OpenAL32.dll,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/OpenAL/lib/release/OpenAL32.dll>
                 "${VULKAN_RUNTIME_DLL}"
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

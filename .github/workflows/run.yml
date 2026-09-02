@@ -70,7 +70,11 @@ jobs:
       - name: Locate executable (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
-          echo "EXE_PATH=build/bin/QuarkEngine" >> "$GITHUB_ENV"
+          src="build/bin/${{ matrix.build_type }}/QuarkEngine"
+          if [ ! -f "$src" ]; then
+            src="build/bin/QuarkEngine"
+          fi
+          echo "EXE_PATH=$src" >> "$GITHUB_ENV"
 
       - name: Run executable (Windows)
         if: runner.os == 'Windows'
