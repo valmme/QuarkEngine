@@ -230,6 +230,7 @@ if(BUILD_ENGINE)
                 $<TARGET_FILE:assimp::assimp>
                 $<TARGET_FILE:freetype>
                 $<TARGET_FILE:SDL3::SDL3>
+                $<TARGET_FILE:OpenAL::OpenAL>
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
             COMMENT "Copying shared libraries next to ${PROJECT_NAME} (Linux/macOS)..."
         )
@@ -239,6 +240,8 @@ if(BUILD_ENGINE)
                 COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:assimp::assimp> $<TARGET_FILE_DIR:${PROJECT_NAME}>/$<IF:$<CONFIG:Debug>,libassimpd.6.dylib,libassimp.6.dylib>
                 COMMAND ${CMAKE_COMMAND} -E rm -f $<TARGET_FILE_DIR:${PROJECT_NAME}>/$<IF:$<CONFIG:Debug>,libfreetyped.6.dylib,libfreetype.6.dylib>
                 COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:freetype> $<TARGET_FILE_DIR:${PROJECT_NAME}>/$<IF:$<CONFIG:Debug>,libfreetyped.6.dylib,libfreetype.6.dylib>
+                COMMAND ${CMAKE_COMMAND} -E rm -f $<TARGET_FILE_DIR:${PROJECT_NAME}>/libopenal.1.dylib
+                COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:OpenAL::OpenAL> $<TARGET_FILE_DIR:${PROJECT_NAME}>/libopenal.1.dylib
                 COMMENT "Creating macOS shared library compatibility symlinks..."
             )
         else()
@@ -246,6 +249,7 @@ if(BUILD_ENGINE)
                 COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:freetype> $<TARGET_FILE_DIR:${PROJECT_NAME}>/$<IF:$<CONFIG:Debug>,libfreetyped.so.6,libfreetype.so.6>
                 COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:assimp::assimp> $<TARGET_FILE_DIR:${PROJECT_NAME}>/$<IF:$<CONFIG:Debug>,libassimpd.so.6,libassimp.so.6>
                 COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:SDL3::SDL3> $<TARGET_FILE_DIR:${PROJECT_NAME}>/libSDL3.so.0
+                COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:OpenAL::OpenAL> $<TARGET_FILE_DIR:${PROJECT_NAME}>/libopenal.so.1
                 COMMENT "Creating shared library symlinks next to ${PROJECT_NAME} (Linux)..."
             )
         endif()
