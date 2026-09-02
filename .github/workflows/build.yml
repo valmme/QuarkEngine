@@ -59,15 +59,31 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $src = "build/bin/${{ matrix.build_type }}"
-          if (!(Test-Path "$src/QuarkEngine.exe")) {
-            $src = "build/bin"
+          $exe = Get-ChildItem -Path "build/bin" -Filter "QuarkEngine.exe" -File -Recurse | Select-Object -First 1
+          if ($null -eq $exe) {
+            throw "QuarkEngine.exe was not found under build/bin"
           }
+          $src = $exe.Directory.FullName
+
           New-Item -ItemType Directory -Force -Path dist
-          Copy-Item "$src/QuarkEngine.exe" dist/
-          Copy-Item "$src/*.dll"            dist/ -ErrorAction SilentlyContinue
-          Copy-Item "build/bin/*.dll"       dist/ -ErrorAction SilentlyContinue
-          Copy-Item "build/bin/assets"      dist/assets -Recurse -ErrorAction SilentlyContinue
+          Copy-Item "$src/*" dist/ -Recurse -Force
+
+          $compiler = Get-Command g++.exe -ErrorAction SilentlyContinue
+          if ($null -ne $compiler) {
+            $compilerDir = Split-Path $compiler.Source
+            foreach ($runtime in @("libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll")) {
+              Copy-Item (Join-Path $compilerDir $runtime) dist/ -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          if (!(Test-Path "dist/QuarkEngine.exe")) {
+            throw "QuarkEngine.exe was not staged"
+          }
+          if (!(Test-Path "dist/assets")) {
+            throw "assets directory was not staged"
+          }
+          Write-Host "Staged files:"
+          Get-ChildItem dist -Recurse | Select-Object -ExpandProperty FullName
 
       - name: Collect artifacts (Linux/macOS)
         if: runner.os != 'Windows'
