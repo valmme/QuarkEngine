@@ -6,7 +6,9 @@
 namespace qc {
 
 #if defined(_WIN32)
-    #if defined(BUILD_LIBTYPE_SHARED)
+    #if defined(QUARKENGINE_BUILD)
+        #define QCIMGUI_API
+    #elif defined(BUILD_LIBTYPE_SHARED)
         #define QCIMGUI_API __declspec(dllexport)
     #else
         #define QCIMGUI_API __declspec(dllimport)

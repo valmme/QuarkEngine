@@ -1,6 +1,9 @@
 #include "qcImGui.h"
 
 #include "imgui.h"
+#if defined(_WIN32)
+#include "imgui_impl_dx11.h"
+#endif
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_vulkan.h"
 #include "imgui_impl_sdl3.h"
@@ -16,7 +19,8 @@ bool g_qc_imgui_initialized = false;
 enum class ImGuiBackendKind {
     None,
     OpenGL,
-    Vulkan
+    Vulkan,
+    D3D11
 };
 
 ImGuiBackendKind g_qc_imgui_backend = ImGuiBackendKind::None;
@@ -33,6 +37,17 @@ void qcImGuiVulkanRenderCallback(VkCommandBuffer commandBuffer) {
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 }
 
+#if defined(_WIN32)
+void qcImGuiD3D11RenderCallback(ID3D11DeviceContext* deviceContext) {
+    if (!g_qc_imgui_initialized || g_qc_imgui_backend != ImGuiBackendKind::D3D11 ||
+        deviceContext == nullptr) {
+        return;
+    }
+
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+}
+#endif
+
 ImTextureID qcImGuiTextureIdFor(const Texture2D* texture) {
     if (texture == nullptr || texture->id == 0) {
         return 0;
@@ -45,6 +60,14 @@ ImTextureID qcImGuiTextureIdFor(const Texture2D* texture) {
         }
         return static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(descriptor));
     }
+
+#if defined(_WIN32)
+    if (GetCurrentBackend() == RendererType::D3D11) {
+        ID3D11ShaderResourceView* shaderResourceView =
+            GetD3D11TextureShaderResourceView(texture->id);
+        return static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(shaderResourceView));
+    }
+#endif
 
     return static_cast<ImTextureID>(static_cast<uintptr_t>(texture->id));
 }
@@ -146,6 +169,25 @@ bool qcImGuiSetup(bool darkTheme) {
         } else {
             ImGui_ImplSDL3_Shutdown();
         }
+#if defined(_WIN32)
+    } else if (backend == RendererType::D3D11) {
+        ID3D11Device* device = GetD3D11Device();
+        ID3D11DeviceContext* deviceContext = GetD3D11ImmediateContext();
+        if (!ImGui_ImplSDL3_InitForD3D(window)) {
+            ImGui::DestroyContext();
+            return false;
+        }
+        if (device == nullptr || deviceContext == nullptr ||
+            !ImGui_ImplDX11_Init(device, deviceContext)) {
+            ImGui_ImplSDL3_Shutdown();
+            ImGui::DestroyContext();
+            return false;
+        }
+
+        SetD3D11RenderCallback(qcImGuiD3D11RenderCallback);
+        g_qc_imgui_backend = ImGuiBackendKind::D3D11;
+        initOk = true;
+#endif
     }
 
     if (!initOk) {
@@ -165,6 +207,9 @@ void qcImGuiShutdown() {
 
     SetNativeEventCallback(nullptr);
     SetVulkanRenderCallback(nullptr);
+#if defined(_WIN32)
+    SetD3D11RenderCallback(nullptr);
+#endif
 
     if (g_qc_imgui_backend == ImGuiBackendKind::OpenGL) {
         ImGui_ImplOpenGL3_Shutdown();
@@ -172,6 +217,11 @@ void qcImGuiShutdown() {
     } else if (g_qc_imgui_backend == ImGuiBackendKind::Vulkan) {
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
+#if defined(_WIN32)
+    } else if (g_qc_imgui_backend == ImGuiBackendKind::D3D11) {
+        ImGui_ImplDX11_Shutdown();
+        ImGui_ImplSDL3_Shutdown();
+#endif
     }
     ImGui::DestroyContext();
     g_qc_imgui_initialized = false;
@@ -188,6 +238,10 @@ void qcImGuiBegin() {
         ImGui_ImplOpenGL3_NewFrame();
     } else if (g_qc_imgui_backend == ImGuiBackendKind::Vulkan) {
         ImGui_ImplVulkan_NewFrame();
+#if defined(_WIN32)
+    } else if (g_qc_imgui_backend == ImGuiBackendKind::D3D11) {
+        ImGui_ImplDX11_NewFrame();
+#endif
     }
     ImGui::NewFrame();
 }

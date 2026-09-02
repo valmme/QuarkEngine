@@ -1735,15 +1735,17 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 }
 
                 if (scene_rt.id > 0) {
-                    const bool vulkan_backend = GetCurrentBackend() == RendererType::Vulkan;
+                    const bool top_left_texture_backend =
+                        GetCurrentBackend() == RendererType::Vulkan ||
+                        GetCurrentBackend() == RendererType::D3D11;
                     qcImGuiAddImage(
                         ImGui::GetWindowDrawList(),
                         &scene_rt.texture,
                         g_scene_window_pos,
                         ImVec2(g_scene_window_pos.x + g_scene_window_size.x,
                             g_scene_window_pos.y + g_scene_window_size.y),
-                        vulkan_backend ? ImVec2(0, 0) : ImVec2(0, 1),
-                        vulkan_backend ? ImVec2(1, 1) : ImVec2(1, 0)
+                        top_left_texture_backend ? ImVec2(0, 0) : ImVec2(0, 1),
+                        top_left_texture_backend ? ImVec2(1, 1) : ImVec2(1, 0)
                     );
                 }
 
@@ -1860,9 +1862,9 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 preferences_changed |= ImGui::Combo("Shadow filtering", &g_editor_preferences.shadow_filter_quality, shadow_filter_names, 3);
                 preferences_changed |= ImGui::SliderInt("Undo history limit", &g_editor_preferences.undo_history_limit, 10, 500);
                 camera.cam.fovy = g_editor_preferences.camera_fov;
-                const char* backend_names[] = { "Auto", "OpenGL", "Vulkan" };
+                const char* backend_names[] = { "Auto", "OpenGL", "Vulkan", "Direct3D 11" };
                 ImGui::Text("Renderer backend (restart required)");
-                preferences_changed |= ImGui::Combo("##renderer_backend", &g_editor_preferences.renderer_backend, backend_names, 3);
+                preferences_changed |= ImGui::Combo("##renderer_backend", &g_editor_preferences.renderer_backend, backend_names, 4);
                 const char* msaa_names[] = { "Off", "2x", "4x", "8x" };
                 int msaa_index = g_editor_preferences.msaa_samples == 2 ? 1 : g_editor_preferences.msaa_samples == 4 ? 2 : g_editor_preferences.msaa_samples == 8 ? 3 : 0;
                 ImGui::Text("MSAA (restart required)");

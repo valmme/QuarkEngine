@@ -75,7 +75,7 @@ static void read_preferences(const json& data) {
     g_editor_preferences.camera_sensitivity = std::clamp(g_editor_preferences.camera_sensitivity, 0.0005f, 0.02f);
     g_editor_preferences.camera_zoom_sensitivity = std::clamp(g_editor_preferences.camera_zoom_sensitivity, 0.1f, 5.0f);
     g_editor_preferences.camera_fov = std::clamp(g_editor_preferences.camera_fov, 20.0f, 120.0f);
-    if (g_editor_preferences.renderer_backend < 0 || g_editor_preferences.renderer_backend > 2) g_editor_preferences.renderer_backend = 0;
+    if (g_editor_preferences.renderer_backend < 0 || g_editor_preferences.renderer_backend > 3) g_editor_preferences.renderer_backend = 0;
     if (g_editor_preferences.msaa_samples != 1 && g_editor_preferences.msaa_samples != 2 && g_editor_preferences.msaa_samples != 4 && g_editor_preferences.msaa_samples != 8) g_editor_preferences.msaa_samples = 1;
     if (g_editor_preferences.texture_filter < 0 || g_editor_preferences.texture_filter > 1) g_editor_preferences.texture_filter = 1;
     g_editor_preferences.interface_scale = std::clamp(g_editor_preferences.interface_scale, 0.75f, 2.0f);

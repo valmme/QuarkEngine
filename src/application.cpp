@@ -561,6 +561,7 @@ void Application::initialize() {
     RendererType renderer_type = RendererType::OpenGL;
     if (g_editor_preferences.renderer_backend == 1) renderer_type = RendererType::OpenGL;
     else if (g_editor_preferences.renderer_backend == 2) renderer_type = RendererType::Vulkan;
+    else if (g_editor_preferences.renderer_backend == 3) renderer_type = RendererType::D3D11;
     if (options.renderer_override == RendererOverride::OpenGL) renderer_type = RendererType::OpenGL;
     else if (options.renderer_override == RendererOverride::Vulkan) renderer_type = RendererType::Vulkan;
 
@@ -633,8 +634,11 @@ void Application::initialize() {
     camera.zoom_sensitivity = g_editor_preferences.camera_zoom_sensitivity;
     camera.cam.fovy = g_editor_preferences.camera_fov;
 
-    lighting_shader = LoadShader("assets/lighting.vs", "assets/lighting.fs");
-    shadow_shader = LoadShader("assets/shadow_depth.vs", "assets/shadow_depth.fs");
+    const bool vulkan_backend = GetCurrentBackend() == RendererType::Vulkan;
+    lighting_shader = LoadShader(vulkan_backend ? "assets/vulkan_lighting.vs" : "assets/lighting.vs",
+        vulkan_backend ? "assets/vulkan_lighting.fs" : "assets/lighting.fs");
+    shadow_shader = LoadShader(vulkan_backend ? "assets/vulkan_shadow_depth.vs" : "assets/shadow_depth.vs",
+        vulkan_backend ? "assets/vulkan_shadow_depth.fs" : "assets/shadow_depth.fs");
     lighting_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(lighting_shader, "viewPos");
     shadows_enabled_loc = GetShaderLocation(lighting_shader, "shadowsEnabled");
     shadow_bias_loc = GetShaderLocation(lighting_shader, "shadowBias");

@@ -8,6 +8,8 @@ option(BUILD_ENGINE "Build Quark Engine" ON)
 option(BUILD_PLUGIN "Build Plugin" OFF)
 
 set(QC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(QC_ENABLE_OPENGL ON CACHE BOOL "" FORCE)
+set(QC_ENABLE_VULKAN ON CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS    ON CACHE BOOL "" FORCE)
@@ -39,11 +41,14 @@ add_library(imgui SHARED
     quark-libs/imgui/include/imgui_widgets.cpp
     quark-libs/imgui/include/imgui_tables.cpp
     imgui/imgui_impl_sdl3.cpp
-    imgui/imgui_impl_opengl3.cpp
-    imgui/imgui_impl_vulkan.cpp
-    src/qcImGui.cpp
     src/ImGuizmo.cpp
 )
+
+add_library(imgui-opengl SHARED imgui/imgui_impl_opengl3.cpp)
+add_library(imgui-vulkan SHARED imgui/imgui_impl_vulkan.cpp)
+if(WIN32)
+    add_library(imgui-direct3d11 SHARED imgui/imgui_impl_dx11.cpp)
+endif()
 
 target_include_directories(imgui PUBLIC
     ${CMAKE_SOURCE_DIR}/quark-libs/imgui/include
@@ -55,10 +60,38 @@ target_include_directories(imgui PUBLIC
 
 target_link_libraries(imgui PUBLIC
     SDL3::SDL3
-    QuarkCore-OpenGL
-    QuarkCore-Vulkan
-    Vulkan::Vulkan
 )
+
+foreach(IMGUI_BACKEND_TARGET IN ITEMS imgui-opengl imgui-vulkan)
+    target_include_directories(${IMGUI_BACKEND_TARGET} PUBLIC
+        ${CMAKE_SOURCE_DIR}/quark-libs/imgui/include
+        ${CMAKE_SOURCE_DIR}/imgui
+    )
+    target_link_libraries(${IMGUI_BACKEND_TARGET} PUBLIC imgui)
+    if(WIN32)
+        target_compile_definitions(${IMGUI_BACKEND_TARGET} PRIVATE
+            IMGUI_API=__declspec\(dllimport\)
+            IMGUI_IMPL_API=__declspec\(dllexport\)
+        )
+    else()
+        target_compile_definitions(${IMGUI_BACKEND_TARGET} PRIVATE
+            IMGUI_API=__attribute__\(visibility\("default"\)\)
+            IMGUI_IMPL_API=__attribute__\(visibility\("default"\)\)
+        )
+    endif()
+endforeach()
+target_link_libraries(imgui-vulkan PUBLIC Vulkan::Vulkan)
+if(WIN32)
+    target_include_directories(imgui-direct3d11 PUBLIC
+        ${CMAKE_SOURCE_DIR}/quark-libs/imgui/include
+        ${CMAKE_SOURCE_DIR}/imgui
+    )
+    target_link_libraries(imgui-direct3d11 PUBLIC imgui d3d11)
+    target_compile_definitions(imgui-direct3d11 PRIVATE
+        IMGUI_API=__declspec\(dllimport\)
+        IMGUI_IMPL_API=__declspec\(dllexport\)
+    )
+endif()
 
 if(WIN32)
     target_compile_definitions(imgui
@@ -84,6 +117,21 @@ if(APPLE)
         BUILD_RPATH "@loader_path"
         INSTALL_RPATH "@loader_path"
     )
+
+    set_target_properties(imgui-opengl imgui-vulkan PROPERTIES
+        PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+        ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+    )
+    if(WIN32)
+        set_target_properties(imgui-direct3d11 PROPERTIES
+            PREFIX ""
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+            ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+        )
+    endif()
 elseif(UNIX)
     set_target_properties(imgui PROPERTIES
         BUILD_RPATH "$ORIGIN"
@@ -120,6 +168,7 @@ if(BUILD_ENGINE)
         src/main.cpp
         src/models.cpp
         src/project.cpp
+        src/qcImGui.cpp
         src/plugins/plugin_manager.cpp
         src/scene.cpp
         src/tex.cpp
@@ -156,10 +205,15 @@ if(BUILD_ENGINE)
     endif()
 
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        QuarkCore-OpenGL
-        QuarkCore-Vulkan
+        QuarkCore-Combined
         imgui
+        imgui-opengl
+        imgui-vulkan
     )
+    target_compile_definitions(${PROJECT_NAME} PRIVATE QUARKENGINE_BUILD QUARKCORE_STATIC)
+    if(WIN32)
+        target_link_libraries(${PROJECT_NAME} PRIVATE imgui-direct3d11)
+    endif()
 
     if(WIN32)
         target_link_libraries(${PROJECT_NAME} PRIVATE winmm gdi32 opengl32)
@@ -213,7 +267,11 @@ if(BUILD_ENGINE)
                 $<TARGET_FILE:QuarkCore>
                 $<TARGET_FILE:QuarkCore-OpenGL>
                 $<TARGET_FILE:QuarkCore-Vulkan>
+                $<TARGET_FILE:QuarkCore-D3D11>
                 $<TARGET_FILE:imgui>
+                $<TARGET_FILE:imgui-opengl>
+                $<TARGET_FILE:imgui-vulkan>
+                $<$<BOOL:${WIN32}>:$<TARGET_FILE:imgui-direct3d11>>
                 $<TARGET_FILE:SDL3::SDL3>
                 $<TARGET_FILE:assimp::assimp>
                 $<TARGET_FILE:ZLIB::ZLIB>
@@ -240,6 +298,8 @@ if(BUILD_ENGINE)
                 $<TARGET_FILE:QuarkCore-OpenGL>
                 $<TARGET_FILE:QuarkCore-Vulkan>
                 $<TARGET_FILE:imgui>
+                $<TARGET_FILE:imgui-opengl>
+                $<TARGET_FILE:imgui-vulkan>
                 $<TARGET_FILE:assimp::assimp>
                 $<TARGET_FILE:freetype>
                 $<TARGET_FILE:SDL3::SDL3>
