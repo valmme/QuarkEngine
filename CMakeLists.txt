@@ -219,11 +219,17 @@ if(BUILD_ENGINE)
                 $<TARGET_FILE:ZLIB::ZLIB>
                 $<TARGET_FILE:freetype>
                 $<IF:$<CONFIG:Debug>,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/OpenAL/lib/debug/OpenAL32.dll,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/OpenAL/lib/release/OpenAL32.dll>
-                $<IF:$<CONFIG:Debug>,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Toolsd.dll,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Tools.dll>
-                $<IF:$<CONFIG:Debug>,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Tools-optd.dll,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Tools-opt.dll>
                 "${VULKAN_RUNTIME_DLL}"
                 ${MINGW_RUNTIME_DLLS}
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        )
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<IF:$<CONFIG:Debug>,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Toolsd.dll,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Tools.dll>
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>/SPIRV-Tools.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<IF:$<CONFIG:Debug>,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Tools-optd.dll,${CMAKE_SOURCE_DIR}/quark-libs/QuarkCore/external/Vulkan/lib/SPIRV-Tools-opt.dll>
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>/SPIRV-Tools-opt.dll
         )
     endif()
 
