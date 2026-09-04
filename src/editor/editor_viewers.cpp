@@ -48,6 +48,14 @@ static Vec3 viewer_model_center = { 0, 0, 0 };
 static Vec3 viewer_model_rotation = { 0, 0, 0 };
 static float viewer_phi = 20.0f, viewer_theta = 45.0f, viewer_radius = 5.0f;
 
+static void release_model_preview() {
+    if (viewer_model.meshCount > 0) {
+        UnloadModel(viewer_model);
+    } else {
+        viewer_model = {};
+    }
+}
+
 static void release_material_preview_model() {
     if (viewer_mat_sphere.meshCount <= 0) {
         return;
@@ -62,9 +70,7 @@ static void release_material_preview_model() {
 }
 
 bool open_model_viewer_for_asset(const ModelAsset& asset) {
-    if (viewer_model.meshCount > 0) {
-        UnloadModel(viewer_model);
-    }
+    release_model_preview();
 
     if (!load_model_instance(asset, viewer_model)) return false;
 
@@ -215,6 +221,7 @@ void load_material_to_entity(Entity* entity, const std::filesystem::path& mtl_pa
     material_file.close();
 
     mat_comp->color = albedo;
+    mat_comp->albedo_texture_name.clear();
     mat_comp->normal_texture_name = normal_texture_name;
     mat_comp->roughness_texture_name = roughness_texture_name;
     mat_comp->metallic_texture_name = metallic_texture_name;
@@ -293,6 +300,7 @@ bool is_material_viewer_visible() {
 
 void show_model_viewer_window(bool show) {
     show_model_viewer = show;
+    if (!show) release_model_preview();
 }
 
 void show_material_viewer_window(bool show) {
@@ -414,9 +422,7 @@ void load_material_texture(const std::string& texture_name) {
 
 void draw_model_viewer_window() {
     if (!show_model_viewer) {
-        if (viewer_model.meshCount > 0) {
-            UnloadModel(viewer_model);
-        }
+        release_model_preview();
         return;
     }
 
@@ -695,9 +701,7 @@ void draw_material_viewer_window(Editor& editor, Entity* selected_entity) {
 }
 
 void cleanup_viewers() {
-    if (viewer_model.meshCount > 0) {
-        UnloadModel(viewer_model);
-    }
+    release_model_preview();
 
     if (viewer_rt.id != 0) {
         UnloadRenderTexture(viewer_rt);

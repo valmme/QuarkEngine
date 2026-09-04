@@ -184,25 +184,50 @@ void ComponentUIHelper::draw_entity_inspector(Editor& editor, Entity& entity, Sh
 void ComponentUIHelper::draw_transform_component(Editor& editor, Entity& entity, TransformComponent* transform) {
     if (!transform) return;
 
+    static bool transform_edit_pending = false;
+    static Vec3 pending_position = {};
+    static Vec3 pending_rotation = {};
+    static Vec3 pending_scale = {1, 1, 1};
+
+    const auto begin_transform_edit = [&](const Vec3& before_position,
+        const Vec3& before_rotation, const Vec3& before_scale) {
+        if (ImGui::IsItemActivated()) {
+            transform_edit_pending = true;
+            pending_position = before_position;
+            pending_rotation = before_rotation;
+            pending_scale = before_scale;
+        }
+    };
+
+    const auto finish_transform_edit = [&]() {
+        if (ImGui::IsItemDeactivatedAfterEdit() && transform_edit_pending) {
+            editor.save_transform_state(&entity, pending_position, pending_rotation, pending_scale);
+            transform_edit_pending = false;
+        }
+    };
+
     float position[3] = {transform->position.x, transform->position.y, transform->position.z};
     float rotation[3] = {transform->rotation.x, transform->rotation.y, transform->rotation.z};
     float scale[3] = {transform->scale.x, transform->scale.y, transform->scale.z};
 
+    const Vec3 before_position = transform->position;
     if (ImGui::DragFloat3(lang.word("position"), position, 0.1f)) {
-        editor.save_state();
         transform->position = {position[0], position[1], position[2]};
         mark_entity_bounds_dirty(&entity);
     }
+    begin_transform_edit(before_position, transform->rotation, transform->scale);
+    finish_transform_edit();
 
+    const Vec3 before_rotation = transform->rotation;
     if (ImGui::DragFloat3(lang.word("rotation"), rotation, 1.0f)) {
-        editor.save_state();
         transform->rotation = {rotation[0], rotation[1], rotation[2]};
         mark_entity_bounds_dirty(&entity);
     }
+    begin_transform_edit(transform->position, before_rotation, transform->scale);
+    finish_transform_edit();
 
+    const Vec3 before_scale = transform->scale;
     if (ImGui::DragFloat3(lang.word("scale"), scale, 0.1f)) {
-        editor.save_state();
-
         auto count_neg = [](float x, float y, float z) {
             return (x < 0.0f ? 1 : 0) + (y < 0.0f ? 1 : 0) + (z < 0.0f ? 1 : 0);
         };
@@ -218,6 +243,8 @@ void ComponentUIHelper::draw_transform_component(Editor& editor, Entity& entity,
             update_model(&entity);
         }
     }
+    begin_transform_edit(transform->position, transform->rotation, before_scale);
+    finish_transform_edit();
 }
 
 void ComponentUIHelper::draw_mesh_component(Editor& editor, Entity& entity, MeshComponent* mesh) {
@@ -512,6 +539,33 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
         ImGui::Text(lang.word("no_materials_found"));
     }
 
+    static int selected_texture_index = 0;
+    std::vector<const char*> texture_names;
+    texture_names.reserve(texture_options.size());
+    selected_texture_index = 0;
+    for (size_t i = 0; i < texture_options.size(); ++i) {
+        texture_names.push_back(texture_options[i].name.c_str());
+        if (texture_options[i].name == mat->albedo_texture_name)
+            selected_texture_index = static_cast<int>(i);
+    }
+
+    ImGui::Text("Direct texture");
+    if (!texture_names.empty() && ImGui::Combo("##direct_texture", &selected_texture_index,
+        texture_names.data(), static_cast<int>(texture_names.size()))) {
+        editor.save_state();
+        if (selected_texture_index == 0) {
+            mat->albedo_texture_name.clear();
+            mat->texture = {0};
+            if (mat->texture_name.empty()) mat->texture_source = TEXTURE_NONE;
+        } else {
+            mat->albedo_texture_name = texture_options[selected_texture_index].name;
+            mat->texture_name.clear();
+            mat->texture = texture_options[selected_texture_index].texture;
+            mat->texture_source = TEXTURE_EXTERNAL;
+        }
+        mark_entity_uv_dirty(&entity);
+    }
+
     if (!mat->texture_name.empty() && mat->texture_name.length() > 4 && 
         mat->texture_name.substr(mat->texture_name.length() - 4) == ".mtl") {
         ImGui::TextDisabled("%s: %s", lang.word("current"), mat->texture_name.c_str());
@@ -562,6 +616,10 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
 
 void ComponentUIHelper::draw_light_component(Editor& editor, Entity& entity, LightComponent* light, Shader shader) {
     if (!light) return;
+
+    if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        editor.save_light_state();
+    }
 
     ImGui::Text(lang.word("light_properties"));
     ImGui::Spacing();
@@ -618,7 +676,6 @@ void ComponentUIHelper::draw_light_component(Editor& editor, Entity& entity, Lig
     }
 
     if (changed) {
-        editor.save_state();
         if (transform) {
             light->light.position = transform->position;
         }

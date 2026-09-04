@@ -33,6 +33,8 @@ extern bool show_scene;
 void copy_entity(Entity* entity);
 void paste_entity(Editor& editor);
 void dublicate_entity(Editor& editor, Entity* entity);
+Entity clone_entity_instance(const Entity& source, Scene& scene);
+void erase_entity_after_hierarchy(Editor& editor, int index);
 void delete_entity(Editor& editor, Entity* entity);
 
 void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* ctx);

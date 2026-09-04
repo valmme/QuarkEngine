@@ -284,10 +284,14 @@ static bool prepare_scene_light_uniforms(Scene& scene, Shader shader, const Vec3
     disable_all_shader_lights(shader);
 
     bool has_active_scene_light = false;
-    for (auto& e : scene.entities) {
+    for (int entity_index = 0; entity_index < static_cast<int>(scene.entities.size()); ++entity_index) {
+        Entity& e = scene.entities[entity_index];
         LightComponent* light = e.get_light_component();
         TransformComponent* transform = e.get_transform_component();
         if (!light || !transform || !light->enabled) continue;
+
+        const Mat4 world_transform = compose_entity_transform(scene, entity_index);
+        const Vec3 world_position = Vec3(world_transform * Vec3{0.0f, 0.0f, 0.0f});
 
         light->light.enabled = true;
         if (!light->created) {
@@ -295,7 +299,7 @@ static bool prepare_scene_light_uniforms(Scene& scene, Shader shader, const Vec3
             if (new_id != -1) {
                 light->light.id = new_id;
                 light->light.light = create_light_at_slot(new_id, light->light.light.type,
-                    transform->position, light->light.target, light->light.color, shader);
+                    world_position, light->light.target, light->light.color, shader);
                 initialize_lighting_uniform_cache(light->light, shader, new_id);
                 light->created = true;
             }
@@ -303,7 +307,7 @@ static bool prepare_scene_light_uniforms(Scene& scene, Shader shader, const Vec3
 
         if (!light->created || light->light.id == -1) continue;
 
-        light->light.position = transform->position;
+        light->light.position = world_position;
 
         if (light->light.light.type == LIGHT_DIRECTIONAL &&
             (light->light.position - light->light.target).length() <= 0.000001f) {

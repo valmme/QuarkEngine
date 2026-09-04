@@ -129,6 +129,7 @@ class MaterialComponent : public Component {
 public:
     Texture2D texture = {0};
     TextureSource texture_source = TEXTURE_NONE;
+    std::string albedo_texture_name;
     std::string texture_name;
     std::string normal_texture_name;
     std::string roughness_texture_name;
@@ -160,6 +161,7 @@ public:
         json["outline_color"] = { outline_color.r, outline_color.g, outline_color.b, outline_color.a };
 
         json["texture_source"] = static_cast<int>(texture_source);
+        json["albedo_texture_name"] = albedo_texture_name;
         json["texture_name"] = texture_name;
         json["normal_texture_name"] = normal_texture_name;
         json["roughness_texture_name"] = roughness_texture_name;
@@ -185,6 +187,7 @@ public:
         }
 
         if (json.contains("texture_source")) texture_source = static_cast<TextureSource>(json["texture_source"].get<int>());
+        if (json.contains("albedo_texture_name")) albedo_texture_name = json["albedo_texture_name"];
         if (json.contains("texture_name")) texture_name = json["texture_name"];
         if (json.contains("normal_texture_name")) normal_texture_name = json["normal_texture_name"];
         if (json.contains("roughness_texture_name")) roughness_texture_name = json["roughness_texture_name"];

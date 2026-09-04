@@ -295,7 +295,17 @@ bool project_load(const std::string& folder_path, Scene& scene, Shader shader) {
                 store_material_textures(&e);
                 apply_mesh_overrides(e);
 
-                if (mat && !mat->texture_name.empty()) {
+                if (mat && !mat->albedo_texture_name.empty()) {
+                    for (const auto& option : texture_options) {
+                        if (option.name == mat->albedo_texture_name) {
+                            mat->texture = option.texture;
+                            break;
+                        }
+                    }
+                    mat->texture_source = TEXTURE_EXTERNAL;
+                }
+
+                else if (mat && !mat->texture_name.empty()) {
                     load_material_to_entity(&e, mat->texture_name);
                     mat->texture_source = TEXTURE_EXTERNAL;
                 }

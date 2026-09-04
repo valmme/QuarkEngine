@@ -12,6 +12,16 @@ struct SceneState {
     std::vector<Entity> entities;
     int selected;
     std::vector<int> selected_entities;
+    bool light_only = false;
+    std::vector<Lighting> lights;
+    bool hierarchy_only = false;
+    std::vector<int> parent_ids;
+    std::vector<Vec3> positions;
+    std::vector<Vec3> rotations;
+    std::vector<Vec3> scales;
+    bool duplicate_only = false;
+    int duplicate_index = -1;
+    int duplicate_source_index = -1;
 };
 
 struct Editor {
@@ -33,6 +43,10 @@ struct Editor {
     void handle_input();
     void draw_entity_with_texture(Entity& e);
     void save_state();
+    void save_light_state();
+    void save_hierarchy_state();
+    void save_transform_state(Entity* entity, const Vec3& position, const Vec3& rotation, const Vec3& scale);
+    void save_duplicate_state(int source_index);
     void undo();
     void redo();
 };

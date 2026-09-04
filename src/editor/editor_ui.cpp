@@ -35,6 +35,8 @@ bool show_preferences = false;
 static bool show_exit_confirmation = false;
 static Editor* pending_delete_editor = nullptr;
 static Entity* pending_delete_entity = nullptr;
+static Editor* deferred_hierarchy_delete_editor = nullptr;
+static int deferred_hierarchy_delete_index = -1;
 
 bool g_is_scene_hovered = false;
 bool g_is_scene_active = false;
@@ -448,6 +450,13 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
 
     Entity* entity = editor.scene.get_selected();
     if (!entity) return;
+    int entity_index = -1;
+    for (int index = 0; index < static_cast<int>(editor.scene.entities.size()); ++index) {
+        if (&editor.scene.entities[index] == entity) {
+            entity_index = index;
+            break;
+        }
+    }
     TransformComponent* transform = entity->get_transform_component();
     MeshComponent* mesh = entity->get_mesh_component();
     if (!transform || !mesh) return;
@@ -537,7 +546,7 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
             );
 
             if (ImGuizmo::IsUsing() && !g_mesh_edit_state.was_using_gizmo) {
-                editor.save_state();
+                editor.save_hierarchy_state();
             }
 
             if (ImGuizmo::IsUsing()) {
@@ -568,12 +577,15 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
     float rotation[3] = { transform->rotation.x, transform->rotation.y, transform->rotation.z };
     float scale[3] = { transform->scale.x, transform->scale.y, transform->scale.z };
 
-    ImGuizmo::RecomposeMatrixFromComponents(
-        translation, 
-        rotation, 
-        scale, 
-        transform_Mat4
-    );
+    Mat4 gizmo_transform = compose_local_entity_transform_Mat4(*entity);
+    const int parent_id = entity_index >= 0 ? entity->parent_id : -1;
+    if (parent_id >= 0 && parent_id < static_cast<int>(editor.scene.entities.size())) {
+        std::vector<int> stack;
+        gizmo_transform = Mat4Multiply(
+            compose_entity_world_transform_Mat4(editor.scene, parent_id, stack),
+            gizmo_transform);
+    }
+    memcpy(transform_Mat4, &gizmo_transform, sizeof(transform_Mat4));
     
     static bool was_using = false;
     
@@ -591,10 +603,18 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
     );
 
     if (ImGuizmo::IsUsing() && !was_using) {
-        editor.save_state();
+        editor.save_hierarchy_state();
     }
 
     if (ImGuizmo::IsUsing()) {
+        if (parent_id >= 0 && parent_id < static_cast<int>(editor.scene.entities.size())) {
+            std::vector<int> stack;
+            const Mat4 parent_world = compose_entity_world_transform_Mat4(editor.scene, parent_id, stack);
+            const Mat4 world_transform = *reinterpret_cast<const Mat4*>(transform_Mat4);
+            const Mat4 local_transform = parent_world.inverted() * world_transform;
+            memcpy(transform_Mat4, &local_transform, sizeof(transform_Mat4));
+        }
+
         float next_translation[3] = {};
         float next_rotation[3] = {};
         float next_scale[3] = {};
@@ -1232,21 +1252,82 @@ void paste_entity(Editor& editor) {
     }
 }
 
-void dublicate_entity(Editor& editor, Entity* entity) {
-    editor.save_state();
-    Entity copy = *entity;
+Entity clone_entity_instance(const Entity& source, Scene& scene) {
+    Entity copy = source;
+    MeshComponent* mesh = copy.get_mesh_component();
+    if (mesh) {
+        mesh->model = {};
+        mesh->owns_model_instance = false;
+        mesh->owns_materials = false;
 
-    copy.id = static_cast<int>(editor.scene.entities.size());
-    copy.name = editor.scene.make_default_name_for(copy);
+        if (mesh->asset && (mesh->asset->is_procedural
+            ? static_cast<bool>(mesh->asset->generator)
+            : !mesh->asset->filepath.empty())) {
+            if (mesh->asset->is_procedural) {
+                mesh->model = mesh->asset->generator(mesh->segments);
+            } else {
+                load_model_instance(*mesh->asset, mesh->model);
+            }
+            mesh->owns_model_instance = mesh->model.meshes != nullptr;
+            store_uv(&copy);
+            store_material_textures(&copy);
+            apply_mesh_overrides(copy);
+            refresh_entity_render_state(copy);
+        }
+    }
+
     if (auto light = copy.get_light_component()) {
         const int light_type = light->light.light.type;
         light->created = false;
         light->light.id = -1;
         light->light.light = {};
         light->light.light.type = light_type;
+        light->light.light.enabled = light->light.enabled;
+        light->light.light.color = light->light.color;
+        light->light.light.position = light->light.position;
+        light->light.light.target = light->light.target;
     }
+
+    copy.id = static_cast<int>(scene.entities.size());
+    copy.name = scene.make_default_name_for(copy);
+    return copy;
+}
+
+void dublicate_entity(Editor& editor, Entity* entity) {
+    if (!entity) return;
+    const int source_index = static_cast<int>(entity - editor.scene.entities.data());
+    editor.save_duplicate_state(source_index);
+    Entity copy = clone_entity_instance(*entity, editor.scene);
     editor.scene.entities.push_back(copy);
     editor.scene.selected = static_cast<int>(editor.scene.entities.size()) - 1;
+}
+
+void erase_entity_after_hierarchy(Editor& editor, int index) {
+    if (index < 0 || index >= static_cast<int>(editor.scene.entities.size())) return;
+
+    Entity& entity = editor.scene.entities[index];
+    if (auto light = entity.get_light_component(); light && light->created) {
+        light->light.enabled = false;
+        free_light_id(light->light.id);
+        light->created = false;
+        light->light.id = -1;
+    }
+
+    if (auto mesh = entity.get_mesh_component(); mesh && mesh->owns_model_instance && mesh->model.meshes) {
+        UnloadModel(mesh->model);
+        mesh->owns_model_instance = false;
+    }
+
+    editor.scene.entities.erase(editor.scene.entities.begin() + index);
+    for (int current = 0; current < static_cast<int>(editor.scene.entities.size()); ++current) {
+        Entity& remaining = editor.scene.entities[current];
+        remaining.id = current;
+        if (remaining.parent_id == index) remaining.parent_id = -1;
+        else if (remaining.parent_id > index) remaining.parent_id--;
+    }
+
+    editor.scene.selected = -1;
+    editor.scene.selected_entities.clear();
 }
 
 void delete_entity(Editor& editor, Entity* entity) {
@@ -1258,15 +1339,8 @@ void delete_entity(Editor& editor, Entity* entity) {
         return;
     }
 
-    editor.save_state();
-    const int index = editor.scene.selected;
-    if (auto light = entity->get_light_component(); light && light->created) {
-        light->light.enabled = false;
-        free_light_id(light->light.id);
-    }
-    
-    editor.scene.entities.erase(editor.scene.entities.begin() + index);
-    editor.scene.selected = -1;
+    const int index = static_cast<int>(entity - editor.scene.entities.data());
+    erase_entity_after_hierarchy(editor, index);
 }
 
 static void draw_bottom_status_bar() {
@@ -1439,7 +1513,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
             if (payload->IsDelivery() && payload->DataSize == sizeof(int)) {
                 const int dropped_index = *static_cast<const int*>(payload->Data);
                 if (dropped_index != target_index) {
-                    editor.save_state();
+                    editor.save_hierarchy_state();
                     move_entity_to_parent(editor.scene, dropped_index, target_index);
                 }
             }
@@ -1481,15 +1555,9 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
         if (ImGui::BeginPopupContextItem(TextFormat("context_%d", entity.id))) {
             if (ImGui::MenuItem(lang.word("delete"))) {
                 editor.save_state();
-                if (auto light = entity.get_light_component(); light && light->created) {
-                    light->light.enabled = false;
-                    if (light->light.id != -1) update_lighting(shader, light->light);
-                    free_light_id(light->light.id);
-                }
 
-                editor.scene.entities.erase(editor.scene.entities.begin() + entity_index);
-                if (editor.scene.selected == entity_index) editor.scene.selected = -1;
-                else if (editor.scene.selected > entity_index) editor.scene.selected--;
+                deferred_hierarchy_delete_editor = &editor;
+                deferred_hierarchy_delete_index = entity_index;
 
                 ImGui::EndPopup();
                 ImGui::PopID();
@@ -1504,17 +1572,9 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
             }
 
             if (ImGui::MenuItem(lang.word("dublicate"))) {
-                editor.save_state();
-                Entity copy = entity;
-                copy.id = static_cast<int>(editor.scene.entities.size());
-                copy.name = editor.scene.make_default_name_for(copy);
-                if (auto light = copy.get_light_component()) {
-                    const int light_type = light->light.light.type;
-                    light->created = false;
-                    light->light.id = -1;
-                    light->light.light = {};
-                    light->light.light.type = light_type;
-                }
+                const int source_index = static_cast<int>(&entity - editor.scene.entities.data());
+                editor.save_duplicate_state(source_index);
+                Entity copy = clone_entity_instance(entity, editor.scene);
                 editor.scene.entities.push_back(copy);
             }
 
@@ -1548,14 +1608,8 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 if (ImGui::BeginPopupContextItem(TextFormat("group_context_%d", child.id))) {
                     if (ImGui::MenuItem(lang.word("delete"))) {
                         editor.save_state();
-                        if (auto light = child.get_light_component(); light && light->created) {
-                            light->light.enabled = false;
-                            if (light->light.id != -1) update_lighting(shader, light->light);
-                            free_light_id(light->light.id);
-                        }
-                        editor.scene.entities.erase(editor.scene.entities.begin() + child_idx);
-                        if (editor.scene.selected == child_idx) editor.scene.selected = -1;
-                        else if (editor.scene.selected > child_idx) editor.scene.selected--;
+                        deferred_hierarchy_delete_editor = &editor;
+                        deferred_hierarchy_delete_index = child_idx;
                         ImGui::EndPopup();
                         if (open) ImGui::TreePop();
                         return;
@@ -1569,17 +1623,8 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                     }
 
                     if (ImGui::MenuItem(lang.word("dublicate"))) {
-                        editor.save_state();
-                        Entity copy = child;
-                        copy.id = static_cast<int>(editor.scene.entities.size());
-                        copy.name = editor.scene.make_default_name_for(copy);
-                        if (auto light = copy.get_light_component()) {
-                            const int light_type = light->light.light.type;
-                            light->created = false;
-                            light->light.id = -1;
-                            light->light.light = {};
-                            light->light.light.type = light_type;
-                        }
+                        editor.save_duplicate_state(child_idx);
+                        Entity copy = clone_entity_instance(child, editor.scene);
                         editor.scene.entities.push_back(copy);
                     }
 
@@ -1620,7 +1665,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                     const int dropped_index = *static_cast<const int*>(payload->Data);
                     if (dropped_index >= 0 && dropped_index < static_cast<int>(editor.scene.entities.size()) &&
                         editor.scene.entities[dropped_index].parent_id != -1) {
-                        editor.save_state();
+                        editor.save_hierarchy_state();
                         move_entity_to_parent(editor.scene, dropped_index, -1);
                     }
                 }
@@ -1668,10 +1713,17 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
             int dropped_index = *(const int*)payload->Data;
-            editor.save_state();
+            editor.save_hierarchy_state();
             move_entity_to_parent(editor.scene, dropped_index, -1);
         }
         ImGui::EndDragDropTarget();
+    }
+
+    if (deferred_hierarchy_delete_editor == &editor && deferred_hierarchy_delete_index >= 0) {
+        const int index = deferred_hierarchy_delete_index;
+        deferred_hierarchy_delete_editor = nullptr;
+        deferred_hierarchy_delete_index = -1;
+        erase_entity_after_hierarchy(editor, index);
     }
     ImGui::End();
     }

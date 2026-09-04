@@ -4,7 +4,9 @@
 #include "editor/editor_ui.h"
 #include "editor/editor_utils.h"
 #include "editor/editor_viewers.h"
+#include "editor/editor_ui.h"
 #include "project.h"
+#include "tex.h"
 #include "imgui.h"
 #include "editor/editor_preferences.h"
 
@@ -27,6 +29,37 @@ bool show_about_window = false;
 bool has_clipboard = false;
 Entity clipboard_data;
 
+void restore_entity_material(Entity& entity) {
+    MaterialComponent* material = entity.get_material_component();
+    if (!material) return;
+
+    if (!material->albedo_texture_name.empty()) {
+        for (const auto& option : texture_options) {
+            if (option.name == material->albedo_texture_name) {
+                material->texture = option.texture;
+                material->texture_source = TEXTURE_EXTERNAL;
+                mark_entity_uv_dirty(&entity);
+                return;
+            }
+        }
+    }
+
+    if (!material->texture_name.empty()) {
+        load_material_to_entity(&entity, material->texture_name, -1);
+        material->texture_source = TEXTURE_EXTERNAL;
+        mark_entity_uv_dirty(&entity);
+        return;
+    }
+
+    if (material->texture_source == TEXTURE_MODEL) {
+        restore_model_textures(&entity);
+    } else if (material->texture_source == TEXTURE_NONE) {
+        material->texture = {0};
+        clear_material_textures(&entity);
+    }
+    mark_entity_uv_dirty(&entity);
+}
+
 void restore_scene_entity_models(Scene& scene) {
     for (auto& entity : scene.entities) {
         MeshComponent* mesh = entity.get_mesh_component();
@@ -38,6 +71,7 @@ void restore_scene_entity_models(Scene& scene) {
             store_uv(&entity);
             store_material_textures(&entity);
             apply_mesh_overrides(entity);
+            restore_entity_material(entity);
         } else {
             if (!load_model_instance(*mesh->asset, mesh->model)) {
                 mesh->asset = nullptr;
@@ -51,10 +85,34 @@ void restore_scene_entity_models(Scene& scene) {
             store_uv(&entity);
             store_material_textures(&entity);
             apply_mesh_overrides(entity);
+            restore_entity_material(entity);
         }
 
         mesh->shader_assigned = false;
     }
+}
+
+void reset_scene_light_runtime(Scene& scene) {
+    for (auto& entity : scene.entities) {
+        LightComponent* light = entity.get_light_component();
+        if (!light) continue;
+
+        if (light->created && light->light.id >= 0) {
+            free_light_id(light->light.id);
+        }
+
+        light->created = false;
+        light->light.id = -1;
+        light->light.light.enabledLoc = -1;
+        light->light.light.typeLoc = -1;
+        light->light.light.positionLoc = -1;
+        light->light.light.targetLoc = -1;
+        light->light.light.colorLoc = -1;
+        light->light.spot_angle_loc = -1;
+        light->light.intensity_loc = -1;
+        light->light.range_loc = -1;
+    }
+    reset_light_registry();
 }
 
 }
@@ -67,14 +125,101 @@ static SceneState capture_scene_state(const Scene& scene) {
     for (auto entity : scene.entities) {
         MeshComponent* mesh = entity.get_mesh_component();
         if (mesh) {
-            mesh->model.materials = nullptr;
-            mesh->model.meshMaterial = nullptr;
+            mesh->model = {};
+            mesh->owns_model_instance = false;
             mesh->owns_materials = false;
+        }
+
+        MaterialComponent* material = entity.get_material_component();
+        if (material) {
+            material->texture = {};
+            material->original_material_textures.clear();
+        }
+
+        LightComponent* light = entity.get_light_component();
+        if (light) {
+            light->created = false;
+            light->light.id = -1;
+            light->light.light.enabledLoc = -1;
+            light->light.light.typeLoc = -1;
+            light->light.light.positionLoc = -1;
+            light->light.light.targetLoc = -1;
+            light->light.light.colorLoc = -1;
+            light->light.light.attenuationLoc = -1;
+            light->light.spot_angle_loc = -1;
+            light->light.intensity_loc = -1;
+            light->light.range_loc = -1;
         }
         state.entities.push_back(entity);
     }
 
     return state;
+}
+
+static SceneState capture_light_state(const Scene& scene) {
+    SceneState state;
+    state.light_only = true;
+    state.selected = scene.selected;
+    state.selected_entities = scene.selected_entities;
+    state.lights.reserve(scene.entities.size());
+    for (const auto& entity : scene.entities) {
+        const LightComponent* light = entity.get_light_component();
+        state.lights.push_back(light ? light->light : Lighting{});
+    }
+    return state;
+}
+
+static void restore_light_state(Scene& scene, const SceneState& state) {
+    const size_t count = std::min(scene.entities.size(), state.lights.size());
+    for (size_t index = 0; index < count; ++index) {
+        LightComponent* light = scene.entities[index].get_light_component();
+        if (light) light->light = state.lights[index];
+    }
+    editor_internal::reset_scene_light_runtime(scene);
+}
+
+static SceneState capture_hierarchy_state(const Scene& scene) {
+    SceneState state;
+    state.hierarchy_only = true;
+    state.selected = scene.selected;
+    state.selected_entities = scene.selected_entities;
+    state.parent_ids.reserve(scene.entities.size());
+    state.positions.reserve(scene.entities.size());
+    state.rotations.reserve(scene.entities.size());
+    state.scales.reserve(scene.entities.size());
+    for (const auto& entity : scene.entities) {
+        state.parent_ids.push_back(entity.parent_id);
+        const TransformComponent* transform = entity.get_transform_component();
+        state.positions.push_back(transform ? transform->position : Vec3{});
+        state.rotations.push_back(transform ? transform->rotation : Vec3{});
+        state.scales.push_back(transform ? transform->scale : Vec3{1, 1, 1});
+    }
+    return state;
+}
+
+static SceneState capture_duplicate_state(const Scene& scene, int source_index) {
+    SceneState state;
+    state.duplicate_only = true;
+    state.duplicate_index = static_cast<int>(scene.entities.size());
+    state.duplicate_source_index = source_index;
+    state.selected = scene.selected;
+    state.selected_entities = scene.selected_entities;
+    return state;
+}
+
+static void restore_hierarchy_state(Scene& scene, const SceneState& state) {
+    const size_t count = std::min(scene.entities.size(), state.parent_ids.size());
+    for (size_t index = 0; index < count; ++index) {
+        Entity& entity = scene.entities[index];
+        entity.parent_id = state.parent_ids[index];
+        if (TransformComponent* transform = entity.get_transform_component()) {
+            transform->position = state.positions[index];
+            transform->rotation = state.rotations[index];
+            transform->scale = state.scales[index];
+        }
+    }
+    scene.selected = state.selected;
+    scene.selected_entities = state.selected_entities;
 }
 
 void Editor::save_state() {
@@ -85,33 +230,120 @@ void Editor::save_state() {
     while (!redo_stack.empty()) redo_stack.pop();
 }
 
+void Editor::save_light_state() {
+    scene_dirty = true;
+    undo_stack.push(capture_light_state(scene));
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
+void Editor::save_hierarchy_state() {
+    scene_dirty = true;
+    undo_stack.push(capture_hierarchy_state(scene));
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
+void Editor::save_transform_state(Entity* entity, const Vec3& position,
+    const Vec3& rotation, const Vec3& scale) {
+    if (!entity) return;
+
+    const int entity_index = static_cast<int>(entity - scene.entities.data());
+    if (entity_index < 0 || entity_index >= static_cast<int>(scene.entities.size())) return;
+
+    SceneState state = capture_hierarchy_state(scene);
+    state.positions[entity_index] = position;
+    state.rotations[entity_index] = rotation;
+    state.scales[entity_index] = scale;
+    undo_stack.push(std::move(state));
+    scene_dirty = true;
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
+void Editor::save_duplicate_state(int source_index) {
+    scene_dirty = true;
+    undo_stack.push(capture_duplicate_state(scene, source_index));
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
 void Editor::undo() {
     if (undo_stack.empty()) return;
-
-    redo_stack.push(capture_scene_state(scene));
 
     SceneState previous = undo_stack.top();
     undo_stack.pop();
 
-    scene.entities = previous.entities;
+    if (previous.light_only) {
+        redo_stack.push(capture_light_state(scene));
+        restore_light_state(scene, previous);
+        return;
+    }
+
+    if (previous.hierarchy_only) {
+        redo_stack.push(capture_hierarchy_state(scene));
+        restore_hierarchy_state(scene, previous);
+        return;
+    }
+
+    if (previous.duplicate_only) {
+        redo_stack.push(capture_duplicate_state(scene, previous.duplicate_source_index));
+        erase_entity_after_hierarchy(*this, previous.duplicate_index);
+        return;
+    }
+
+    redo_stack.push(capture_scene_state(scene));
+
+    scene.release_resources();
+    scene.entities = std::move(previous.entities);
     scene.selected = previous.selected;
     scene.selected_entities = previous.selected_entities;
+    editor_internal::reset_scene_light_runtime(scene);
     editor_internal::restore_scene_entity_models(scene);
 }
 
 void Editor::redo() {
     if (redo_stack.empty()) return;
 
+    SceneState next = redo_stack.top();
+    redo_stack.pop();
+
+    if (next.light_only) {
+        undo_stack.push(capture_light_state(scene));
+        restore_light_state(scene, next);
+        return;
+    }
+
+    if (next.hierarchy_only) {
+        undo_stack.push(capture_hierarchy_state(scene));
+        restore_hierarchy_state(scene, next);
+        return;
+    }
+
+    if (next.duplicate_only) {
+        undo_stack.push(capture_duplicate_state(scene, next.duplicate_source_index));
+        if (next.duplicate_source_index >= 0 &&
+            next.duplicate_source_index < static_cast<int>(scene.entities.size())) {
+            Entity copy = clone_entity_instance(scene.entities[next.duplicate_source_index], scene);
+            scene.entities.push_back(copy);
+            scene.selected = static_cast<int>(scene.entities.size()) - 1;
+        }
+        return;
+    }
+
     undo_stack.push(capture_scene_state(scene));
     while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
         undo_stack.pop();
 
-    SceneState next = redo_stack.top();
-    redo_stack.pop();
-
-    scene.entities = next.entities;
+    scene.release_resources();
+    scene.entities = std::move(next.entities);
     scene.selected = next.selected;
     scene.selected_entities = next.selected_entities;
+    editor_internal::reset_scene_light_runtime(scene);
     editor_internal::restore_scene_entity_models(scene);
 }
 
