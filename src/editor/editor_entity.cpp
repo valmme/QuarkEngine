@@ -86,6 +86,7 @@ void make_prefab(Entity entity, const fs::path path) {
     nlohmann::json j;
 
     j["name"] = entity.name;
+    j["tags"] = entity.tags;
     j["is_group"] = entity.is_group;
     j["parent_id"] = entity.parent_id;
 
@@ -117,6 +118,9 @@ Entity make_entity_from_prefab(Scene& scene, const fs::path filename) {
     Entity entity;
     
     entity.name = j.value("name", "Entity");
+    if (j.contains("tags") && j["tags"].is_array()) {
+        entity.tags = j["tags"].get<std::vector<std::string>>();
+    }
     entity.is_group = j.value("is_group", false);
     entity.parent_id = j.value("parent_id", -1);
     entity.id = static_cast<int>(scene.entities.size());

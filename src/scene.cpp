@@ -72,6 +72,7 @@ void Scene::release_resources() {
                 mesh->model.meshMaterial = nullptr;
             }
 
+            mesh->model.materialCount = 0;
             mesh->owns_materials = false;
         }
 

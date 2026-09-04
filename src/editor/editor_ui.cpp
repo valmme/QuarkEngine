@@ -1,3 +1,19 @@
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#define CloseWindow WinCloseWindow
+#define ShowCursor WinShowCursor
+#define Rectangle WinRectangle
+#include <windows.h>
+#include <shlobj.h>
+#include <ole2.h>
+#undef CloseWindow
+#undef ShowCursor
+#undef Rectangle
+#undef near
+#undef far
+#endif
+
 #include "editor/editor_ui.h"
 
 #include "editor/editor.h"
@@ -16,13 +32,34 @@
 #include "imgui_internal.h"
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <vector>
 #include "language_manager.h"
 #include "editor/editor_preferences.h"
 
+#ifdef _WIN32
+#endif
+
 #define lang LanguageManager::get()
+
+static std::string browse_project_folder() {
+#ifdef _WIN32
+    char path[MAX_PATH] = {};
+    BROWSEINFOA browse_info = {};
+    browse_info.lpszTitle = "Select folder for scene";
+    browse_info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    LPITEMIDLIST item_id = SHBrowseForFolderA(&browse_info);
+    if (!item_id) return {};
+
+    SHGetPathFromIDListA(item_id, path);
+    CoTaskMemFree(item_id);
+    return path;
+#else
+    return {};
+#endif
+}
 
 void ApplyCustomImGuiTheme();
 
@@ -1413,6 +1450,17 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 project_save(editor.project_path, editor.scene);
                 editor.scene_dirty = false;
             }
+            if (ImGui::MenuItem("Save As...")) {
+                const std::string selected_folder = browse_project_folder();
+                if (!selected_folder.empty()) {
+                    project_save(selected_folder, editor.scene);
+                    editor.project_path = selected_folder;
+                    editor.current_asset_path = std::filesystem::path(selected_folder) / "resources";
+                    std::error_code error;
+                    std::filesystem::create_directories(editor.current_asset_path, error);
+                    editor.scene_dirty = false;
+                }
+            }
             ImGui::Separator();
             if (ImGui::MenuItem(lang.word("exit"))) {
                 if (g_editor_preferences.confirm_exit && editor.scene_dirty)
@@ -1758,6 +1806,61 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 }
             } else {
                 last_name = inspector_name;
+            }
+
+            ImGui::Spacing();
+            const char* current_tag = entity->tags.empty() ? "Untagged" : entity->tags.front().c_str();
+            bool open_add_tag_popup = false;
+            if (ImGui::BeginCombo("Tag", current_tag)) {
+                if (ImGui::Selectable("Untagged", entity->tags.empty())) {
+                    if (!entity->tags.empty()) {
+                        editor.save_tags_state();
+                        entity->tags.clear();
+                    }
+                }
+
+                for (size_t tag_index = 0; tag_index < entity->tags.size(); ++tag_index) {
+                    ImGui::PushID(static_cast<int>(tag_index));
+                    ImGui::Selectable(entity->tags[tag_index].c_str(), tag_index == 0);
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("x")) {
+                        editor.save_tags_state();
+                        entity->tags.erase(entity->tags.begin() + static_cast<std::ptrdiff_t>(tag_index));
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::PopID();
+                }
+
+                ImGui::Separator();
+                if (ImGui::Selectable("Add Tag...")) {
+                    open_add_tag_popup = true;
+                }
+                ImGui::EndCombo();
+            }
+
+            static char tag_buf[128] = {};
+            if (open_add_tag_popup) {
+                ImGui::OpenPopup("AddTagPopup");
+            }
+            if (ImGui::BeginPopup("AddTagPopup")) {
+                ImGui::TextUnformatted("Add Tag");
+                ImGui::InputText("##tag_name", tag_buf, IM_ARRAYSIZE(tag_buf));
+                if (ImGui::Button("Add") && tag_buf[0] != '\0') {
+                    const std::string new_tag(tag_buf);
+                    if (std::find(entity->tags.begin(), entity->tags.end(), new_tag) == entity->tags.end()) {
+                        editor.save_tags_state();
+                        entity->tags.push_back(new_tag);
+                    }
+                    tag_buf[0] = '\0';
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel")) {
+                    tag_buf[0] = '\0';
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
             }
 
             ImGui::Spacing();

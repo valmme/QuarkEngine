@@ -207,6 +207,99 @@ static SceneState capture_duplicate_state(const Scene& scene, int source_index) 
     return state;
 }
 
+static SceneState capture_tags_state(const Scene& scene) {
+    SceneState state;
+    state.tags_only = true;
+    state.selected = scene.selected;
+    state.selected_entities = scene.selected_entities;
+    state.tags.reserve(scene.entities.size());
+    for (const auto& entity : scene.entities) {
+        state.tags.push_back(entity.tags);
+    }
+    return state;
+}
+
+static void restore_tags_state(Scene& scene, const SceneState& state) {
+    const size_t count = std::min(scene.entities.size(), state.tags.size());
+    for (size_t index = 0; index < count; ++index) {
+        scene.entities[index].tags = state.tags[index];
+    }
+    scene.selected = state.selected;
+    scene.selected_entities = state.selected_entities;
+}
+
+static SceneState capture_material_state(const Scene& scene) {
+    SceneState state;
+    state.material_only = true;
+    state.selected = scene.selected;
+    state.selected_entities = scene.selected_entities;
+    state.materials.reserve(scene.entities.size());
+    for (const auto& entity : scene.entities) {
+        SceneState::MaterialSnapshot snapshot;
+        if (const MaterialComponent* material = entity.get_material_component()) {
+            snapshot.texture_source = material->texture_source;
+            snapshot.albedo_texture_name = material->albedo_texture_name;
+            snapshot.texture_name = material->texture_name;
+            snapshot.material_slot_sources = material->material_slot_sources;
+            snapshot.color = material->color;
+            snapshot.outline_color = material->outline_color;
+            snapshot.auto_uv = material->auto_uv;
+            snapshot.texture_stretch = material->texture_stretch;
+            snapshot.texture_repeat_u = material->texture_repeat_u;
+            snapshot.texture_repeat_v = material->texture_repeat_v;
+            snapshot.uv_scale = material->uv_scale;
+        }
+        state.materials.push_back(std::move(snapshot));
+    }
+    return state;
+}
+
+static void restore_material_state(Scene& scene, const SceneState& state) {
+    const size_t count = std::min(scene.entities.size(), state.materials.size());
+    for (size_t index = 0; index < count; ++index) {
+        MaterialComponent* material = scene.entities[index].get_material_component();
+        MeshComponent* mesh = scene.entities[index].get_mesh_component();
+        if (!material || !mesh) continue;
+
+        const auto& snapshot = state.materials[index];
+        material->texture_source = snapshot.texture_source;
+        material->albedo_texture_name = snapshot.albedo_texture_name;
+        material->texture_name = snapshot.texture_name;
+        material->material_slot_sources = snapshot.material_slot_sources;
+        material->color = snapshot.color;
+        material->outline_color = snapshot.outline_color;
+        material->auto_uv = snapshot.auto_uv;
+        material->texture_stretch = snapshot.texture_stretch;
+        material->texture_repeat_u = snapshot.texture_repeat_u;
+        material->texture_repeat_v = snapshot.texture_repeat_v;
+        material->uv_scale = snapshot.uv_scale;
+        material->texture = {};
+
+        clear_material_textures(&scene.entities[index]);
+        for (int slot = 0; slot < mesh->model.materialCount; ++slot) {
+            if (slot >= static_cast<int>(material->material_slot_sources.size()) ||
+                material->material_slot_sources[slot].empty()) continue;
+            load_material_to_entity(&scene.entities[index], material->material_slot_sources[slot], slot);
+        }
+
+        if (!material->albedo_texture_name.empty()) {
+            for (const auto& option : texture_options) {
+                if (option.name == material->albedo_texture_name) {
+                    material->texture = option.texture;
+                    break;
+                }
+            }
+        } else if (!material->texture_name.empty()) {
+            load_material_to_entity(&scene.entities[index], material->texture_name, -1);
+        } else if (material->texture_source == TEXTURE_MODEL) {
+            restore_model_textures(&scene.entities[index]);
+        }
+        mark_entity_uv_dirty(&scene.entities[index]);
+    }
+    scene.selected = state.selected;
+    scene.selected_entities = state.selected_entities;
+}
+
 static void restore_hierarchy_state(Scene& scene, const SceneState& state) {
     const size_t count = std::min(scene.entities.size(), state.parent_ids.size());
     for (size_t index = 0; index < count; ++index) {
@@ -272,6 +365,48 @@ void Editor::save_duplicate_state(int source_index) {
     while (!redo_stack.empty()) redo_stack.pop();
 }
 
+void Editor::save_tags_state() {
+    scene_dirty = true;
+    undo_stack.push(capture_tags_state(scene));
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
+void Editor::save_material_state() {
+    scene_dirty = true;
+    undo_stack.push(capture_material_state(scene));
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
+void Editor::save_material_state_before(Entity* entity, const MaterialComponent& material) {
+    if (!entity) return;
+    const int entity_index = static_cast<int>(entity - scene.entities.data());
+    if (entity_index < 0 || entity_index >= static_cast<int>(scene.entities.size())) return;
+
+    SceneState state = capture_material_state(scene);
+    auto& snapshot = state.materials[entity_index];
+    snapshot.texture_source = material.texture_source;
+    snapshot.albedo_texture_name = material.albedo_texture_name;
+    snapshot.texture_name = material.texture_name;
+    snapshot.material_slot_sources = material.material_slot_sources;
+    snapshot.color = material.color;
+    snapshot.outline_color = material.outline_color;
+    snapshot.auto_uv = material.auto_uv;
+    snapshot.texture_stretch = material.texture_stretch;
+    snapshot.texture_repeat_u = material.texture_repeat_u;
+    snapshot.texture_repeat_v = material.texture_repeat_v;
+    snapshot.uv_scale = material.uv_scale;
+
+    scene_dirty = true;
+    undo_stack.push(std::move(state));
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
 void Editor::undo() {
     if (undo_stack.empty()) return;
 
@@ -293,6 +428,18 @@ void Editor::undo() {
     if (previous.duplicate_only) {
         redo_stack.push(capture_duplicate_state(scene, previous.duplicate_source_index));
         erase_entity_after_hierarchy(*this, previous.duplicate_index);
+        return;
+    }
+
+    if (previous.tags_only) {
+        redo_stack.push(capture_tags_state(scene));
+        restore_tags_state(scene, previous);
+        return;
+    }
+
+    if (previous.material_only) {
+        redo_stack.push(capture_material_state(scene));
+        restore_material_state(scene, previous);
         return;
     }
 
@@ -332,6 +479,18 @@ void Editor::redo() {
             scene.entities.push_back(copy);
             scene.selected = static_cast<int>(scene.entities.size()) - 1;
         }
+        return;
+    }
+
+    if (next.tags_only) {
+        undo_stack.push(capture_tags_state(scene));
+        restore_tags_state(scene, next);
+        return;
+    }
+
+    if (next.material_only) {
+        undo_stack.push(capture_material_state(scene));
+        restore_material_state(scene, next);
         return;
     }
 

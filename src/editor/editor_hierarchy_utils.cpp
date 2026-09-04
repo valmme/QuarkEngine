@@ -1,4 +1,6 @@
 #include "editor/editor_hierarchy_utils.h"
+#include "imgui.h"
+#include "ImGuizmo.h"
 #include <algorithm>
 #include <cmath>
 
@@ -33,24 +35,14 @@ static Mat4 compose_world_transform(const Scene& scene, int entity_index) {
 }
 
 static void decompose_transform(const Mat4& matrix, TransformComponent& transform) {
-    const float scale_x = std::sqrt(matrix.m[0] * matrix.m[0] + matrix.m[1] * matrix.m[1] + matrix.m[2] * matrix.m[2]);
-    const float scale_y = std::sqrt(matrix.m[4] * matrix.m[4] + matrix.m[5] * matrix.m[5] + matrix.m[6] * matrix.m[6]);
-    const float scale_z = std::sqrt(matrix.m[8] * matrix.m[8] + matrix.m[9] * matrix.m[9] + matrix.m[10] * matrix.m[10]);
-    if (scale_x <= 0.000001f || scale_y <= 0.000001f || scale_z <= 0.000001f) return;
-
-    const float r00 = matrix.m[0] / scale_x;
-    const float r01 = matrix.m[4] / scale_y;
-    const float r02 = matrix.m[8] / scale_z;
-    const float r12 = matrix.m[9] / scale_z;
-    const float r22 = matrix.m[10] / scale_z;
-
-    transform.position = {matrix.m[12], matrix.m[13], matrix.m[14]};
-    transform.scale = {scale_x, scale_y, scale_z};
-    transform.rotation = {
-        std::atan2(-r12, r22) / DEG2RAD,
-        std::asin(std::clamp(r02, -1.0f, 1.0f)) / DEG2RAD,
-        std::atan2(-r01, r00) / DEG2RAD
-    };
+    float components[3][3] = {};
+    float values[16] = {};
+    std::copy(std::begin(matrix.m), std::end(matrix.m), std::begin(values));
+    ImGuizmo::DecomposeMatrixToComponents(
+        values, components[0], components[1], components[2]);
+    transform.position = {components[0][0], components[0][1], components[0][2]};
+    transform.rotation = {components[1][0], components[1][1], components[1][2]};
+    transform.scale = {components[2][0], components[2][1], components[2][2]};
 }
 
 std::vector<int> get_entity_children(const Scene& scene, int parent_id) {
@@ -94,14 +86,18 @@ void move_entity_to_parent(Scene& scene, int entity_id, int new_parent_id) {
     }
     
     const Mat4 world_transform = compose_world_transform(scene, entity_id);
+    const Vec3 world_position = world_transform * Vec3{0.0f, 0.0f, 0.0f};
     const Mat4 parent_transform = new_parent_id >= 0
         ? compose_world_transform(scene, new_parent_id)
         : Mat4::identity();
-    const Mat4 local_transform = parent_transform.inverted() * world_transform;
+    const Mat4 inverse_parent_transform = parent_transform.inverted();
+    const Mat4 local_transform = inverse_parent_transform * world_transform;
 
     scene.entities[entity_id].parent_id = new_parent_id;
-    if (TransformComponent* transform = scene.entities[entity_id].get_transform_component())
+    if (TransformComponent* transform = scene.entities[entity_id].get_transform_component()) {
         decompose_transform(local_transform, *transform);
+        transform->position = inverse_parent_transform * world_position;
+    }
 }
 
 int create_group(Scene& scene, const std::string& name, int parent_id) {

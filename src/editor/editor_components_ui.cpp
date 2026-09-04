@@ -480,7 +480,7 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
             ImGui::SameLine();
             if (ImGui::Combo("##slot_material", &slot_material_index, material_names_cstr.data(),
                              static_cast<int>(material_names_cstr.size()))) {
-                editor.save_state();
+                editor.save_material_state();
                 if (slot_material_index == 0) {
                     if (mesh->model.materials && mesh->model.materials[slot].maps) {
                         mesh->model.materials[slot].maps[MATERIAL_MAP_ALBEDO].texture = {0};
@@ -521,8 +521,8 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
     if (!material_names_cstr.empty()) {
         if (ImGui::Combo("##material_combo", &selected_material_index, material_names_cstr.data(), 
                          static_cast<int>(material_names_cstr.size()))) {
+            editor.save_material_state();
             if (selected_material_index == 0) {
-                editor.save_state();
                 clear_material_textures(&entity);
                 mat->texture_name.clear();
                 mat->texture = {0};
@@ -531,7 +531,6 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
                 const std::string& selected_path = available_materials[selected_material_index];
                 if (std::filesystem::exists(selected_path)) {
                     load_material_to_entity(&entity, selected_path);
-                    editor.save_state();
                 }
             }
         }
@@ -552,7 +551,7 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
     ImGui::Text("Direct texture");
     if (!texture_names.empty() && ImGui::Combo("##direct_texture", &selected_texture_index,
         texture_names.data(), static_cast<int>(texture_names.size()))) {
-        editor.save_state();
+        editor.save_material_state();
         if (selected_texture_index == 0) {
             mat->albedo_texture_name.clear();
             mat->texture = {0};
@@ -580,32 +579,37 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
 
     bool uv_changed = false;
 
+    const MaterialComponent before_stretch = *mat;
     if (ImGui::Checkbox(lang.word("stretch_texture"), &mat->texture_stretch)) {
-        editor.save_state();
+        if (ImGui::IsItemActivated()) editor.save_material_state_before(&entity, before_stretch);
         uv_changed = true;
     }
 
     if (!mat->texture_stretch) {
+        const MaterialComponent before_repeat_u = *mat;
         if (ImGui::DragFloat(lang.word("repeat_u"), &mat->texture_repeat_u, 0.1f, 0.1f, 10.0f)) {
-            editor.save_state();
+            if (ImGui::IsItemActivated()) editor.save_material_state_before(&entity, before_repeat_u);
             uv_changed = true;
         }
 
+        const MaterialComponent before_repeat_v = *mat;
         if (ImGui::DragFloat(lang.word("repeat_v"), &mat->texture_repeat_v, 0.1f, 0.1f, 10.0f)) {
-            editor.save_state();
+            if (ImGui::IsItemActivated()) editor.save_material_state_before(&entity, before_repeat_v);
             uv_changed = true;
         }
 
         float uv_scale[2] = {mat->uv_scale.x, mat->uv_scale.y};
+        const MaterialComponent before_uv_scale = *mat;
         if (ImGui::DragFloat2(lang.word("uv_scale_x"), uv_scale, 0.1f, 0.1f, 5.0f)) {
-            editor.save_state();
+            if (ImGui::IsItemActivated()) editor.save_material_state_before(&entity, before_uv_scale);
             mat->uv_scale = {uv_scale[0], uv_scale[1]};
             uv_changed = true;
         }
     }
 
+    const MaterialComponent before_auto_uv = *mat;
     if (ImGui::Checkbox(lang.word("auto_uv"), &mat->auto_uv)) {
-        editor.save_state();
+        if (ImGui::IsItemActivated()) editor.save_material_state_before(&entity, before_auto_uv);
         uv_changed = true;
     }
 

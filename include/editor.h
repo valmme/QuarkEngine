@@ -22,6 +22,23 @@ struct SceneState {
     bool duplicate_only = false;
     int duplicate_index = -1;
     int duplicate_source_index = -1;
+    bool tags_only = false;
+    std::vector<std::vector<std::string>> tags;
+    bool material_only = false;
+    struct MaterialSnapshot {
+        TextureSource texture_source = TEXTURE_NONE;
+        std::string albedo_texture_name;
+        std::string texture_name;
+        std::vector<std::string> material_slot_sources;
+        Color color = WHITE;
+        Color outline_color = LIGHTGRAY;
+        bool auto_uv = false;
+        bool texture_stretch = true;
+        float texture_repeat_u = 1.0f;
+        float texture_repeat_v = 1.0f;
+        Vec2 uv_scale = {1, 1};
+    };
+    std::vector<MaterialSnapshot> materials;
 };
 
 struct Editor {
@@ -47,6 +64,9 @@ struct Editor {
     void save_hierarchy_state();
     void save_transform_state(Entity* entity, const Vec3& position, const Vec3& rotation, const Vec3& scale);
     void save_duplicate_state(int source_index);
+    void save_tags_state();
+    void save_material_state();
+    void save_material_state_before(Entity* entity, const MaterialComponent& material);
     void undo();
     void redo();
 };

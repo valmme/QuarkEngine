@@ -743,8 +743,9 @@ void Application::update_frame() {
         last_autosave_time = GetTime();
     }
 
-    SetWindowTitle(TextFormat("Quark Engine | %s | FPS: %d",
-        fs::path(project_path).filename().string().c_str(), GetFPS()));
+    const std::string project_title = fs::path(editor.project_path).filename().string();
+    SetWindowTitle(TextFormat("Quark Engine | %s%s | FPS: %d",
+        project_title.c_str(), editor.scene_dirty ? "*" : "", GetFPS()));
 
     BoundingBox scene_bounds = compute_scene_bounds(editor.scene);
     Vec3 scene_center = {
@@ -830,12 +831,15 @@ void Application::render_frame() {
                     }
                 }
                 if (g_editor_preferences.show_light_helpers) {
-                    for (auto& entity : editor.scene.entities) {
+                    for (int entity_index = 0; entity_index < static_cast<int>(editor.scene.entities.size()); ++entity_index) {
+                        auto& entity = editor.scene.entities[entity_index];
                         LightComponent* light = entity.get_light_component();
                         TransformComponent* transform = entity.get_transform_component();
                         if (!light || !transform || !light->enabled) continue;
-                        DrawSphere(transform->position, 0.15f, light->light.color);
-                        DrawLine3D(transform->position, light->light.target, light->light.color);
+                        const Mat4 world_transform = compose_entity_transform(editor.scene, entity_index);
+                        const Vec3 world_position = Vec3(world_transform * Vec3{0.0f, 0.0f, 0.0f});
+                        DrawSphere(world_position, 0.15f, light->light.color);
+                        DrawLine3D(world_position, light->light.target, light->light.color);
                     }
                 }
                 if (g_editor_preferences.show_cameras) {

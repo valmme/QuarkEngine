@@ -174,6 +174,7 @@ void project_save(const std::string& folder_path, const Scene& scene) {
     for (const auto& e : scene.entities) {
         json ej;
         ej["name"] = e.name;
+        ej["tags"] = e.tags;
         ej["is_group"] = e.is_group;
         ej["parent_id"] = e.parent_id;
 
@@ -239,6 +240,10 @@ bool project_load(const std::string& folder_path, Scene& scene, Shader shader) {
         Entity e;
         e.name = ej["name"].get<std::string>();
         e.id   = static_cast<int>(scene.entities.size());
+
+        if (ej.contains("tags") && ej["tags"].is_array()) {
+            e.tags = ej["tags"].get<std::vector<std::string>>();
+        }
         
         if (ej.contains("is_group")) {
             e.is_group = ej["is_group"].get<bool>();

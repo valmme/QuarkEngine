@@ -37,6 +37,7 @@ Entity::~Entity() {
 Entity::Entity(const Entity& other)
     : id(other.id),
       name(other.name),
+    tags(other.tags),
       parent_id(other.parent_id),
       is_group(other.is_group)
 {
@@ -67,6 +68,11 @@ Entity::Entity(const Entity& other)
                 auto dst = std::make_shared<MaterialComponent>(*src);
                 cloned = dst;
             }
+            else if (comp->get_type() == COMPONENT_COLLISION) {
+                auto src = std::dynamic_pointer_cast<CollisionComponent>(comp);
+                auto dst = std::make_shared<CollisionComponent>(*src);
+                cloned = dst;
+            }
             
             if (cloned) {
                 components->add_component(cloned);
@@ -80,6 +86,7 @@ Entity& Entity::operator=(const Entity& other) {
     
     id = other.id;
     name = other.name;
+    tags = other.tags;
     parent_id = other.parent_id;
     is_group = other.is_group;
     
@@ -108,6 +115,11 @@ Entity& Entity::operator=(const Entity& other) {
             else if(comp->get_type() == COMPONENT_MATERIAL) {
                 auto src = std::dynamic_pointer_cast<MaterialComponent>(comp);
                 auto dst = std::make_shared<MaterialComponent>(*src);
+                cloned = dst;
+            }
+            else if (comp->get_type() == COMPONENT_COLLISION) {
+                auto src = std::dynamic_pointer_cast<CollisionComponent>(comp);
+                auto dst = std::make_shared<CollisionComponent>(*src);
                 cloned = dst;
             }
             
