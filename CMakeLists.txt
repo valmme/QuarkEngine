@@ -75,8 +75,8 @@ foreach(IMGUI_BACKEND_TARGET IN ITEMS imgui-opengl imgui-vulkan)
         )
     else()
         target_compile_definitions(${IMGUI_BACKEND_TARGET} PRIVATE
-            IMGUI_API=__attribute__\(visibility\("default"\)\)
-            IMGUI_IMPL_API=__attribute__\(visibility\("default"\)\)
+            "IMGUI_API=__attribute__((visibility(\"default\")))"
+            "IMGUI_IMPL_API=__attribute__((visibility(\"default\")))"
         )
     endif()
 endforeach()
