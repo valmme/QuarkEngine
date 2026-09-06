@@ -1583,6 +1583,28 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
         ImGui::EndDragDropTarget();
     };
 
+    auto draw_create_menu = [&](int parent_index) {
+        if (ImGui::BeginMenu(lang.word("create"))) {
+            editor.save_state();
+            for (int asset_index = 0; asset_index < static_cast<int>(assets.size()); asset_index++) {
+                auto& asset = assets[asset_index];
+                const std::string label = asset.name + "##create_" + std::to_string(asset_index);
+                if (ImGui::MenuItem(label.c_str())) {
+                    Entity entity = make_entity_from_asset(editor.scene, asset);
+                    const MeshComponent* mesh = entity.get_mesh_component();
+                    if (!mesh || !has_valid_model_data(mesh->model)) continue;
+                    entity.parent_id = parent_index;
+                    editor.scene.entities.push_back(entity);
+                }
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::MenuItem(lang.word("create_group"))) {
+            editor.save_state();
+            create_group(editor.scene, "Group", parent_index);
+        }
+    };
+
     auto draw_entity_item = [&](int entity_index) {
         Entity& entity = editor.scene.entities[entity_index];
         const bool selected = editor.scene.is_selected(entity_index);
@@ -1628,6 +1650,9 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 editor.scene.entities.push_back(copy);
             }
 
+            ImGui::Separator();
+            draw_create_menu(entity_index);
+
             ImGui::EndPopup();
         }
         
@@ -1640,7 +1665,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
             Entity& child = editor.scene.entities[child_idx];
             
             if (child.is_group) {
-                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
                 if (editor.scene.is_selected(child_idx)) {
                     flags |= ImGuiTreeNodeFlags_Selected;
                 }
@@ -1678,6 +1703,9 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                         editor.scene.entities.push_back(copy);
                     }
 
+                    ImGui::Separator();
+                    draw_create_menu(child_idx);
+
                     ImGui::EndPopup();
                 }
                 
@@ -1708,8 +1736,9 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
 
     const ImVec2 hierarchy_space = ImGui::GetContentRegionAvail();
     if (hierarchy_space.x > 1.0f && hierarchy_space.y > 1.0f) {
-        ImGui::InvisibleButton("HierarchyRootDropZone", hierarchy_space);
-        if (ImGui::BeginDragDropTarget()) {
+        const ImVec2 drop_min = ImGui::GetCursorScreenPos();
+        const ImRect drop_zone(drop_min, ImVec2(drop_min.x + hierarchy_space.x, drop_min.y + hierarchy_space.y));
+        if (ImGui::BeginDragDropTargetCustom(drop_zone, ImGui::GetID("HierarchyRootDropZone"))) {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
                 if (payload->IsDelivery() && payload->DataSize == sizeof(int)) {
                     const int dropped_index = *static_cast<const int*>(payload->Data);
@@ -1723,8 +1752,8 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
 
             if (ImGui::IsDragDropPayloadBeingAccepted()) {
                 ImGui::GetWindowDrawList()->AddRect(
-                    ImGui::GetItemRectMin(),
-                    ImGui::GetItemRectMax(),
+                    drop_zone.Min,
+                    drop_zone.Max,
                     IM_COL32(80, 180, 255, 255),
                     2.0f,
                     0,
@@ -1736,27 +1765,8 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
     }
 
     if (ImGui::BeginPopupContextWindow("HierarchyContext", ImGuiPopupFlags_NoOpenOverItems)) {
-        if (ImGui::BeginMenu(lang.word("create"))) {
-            editor.save_state();
-            for (int asset_index = 0; asset_index < static_cast<int>(assets.size()); asset_index++) {
-                auto& asset = assets[asset_index];
-                const std::string label = asset.name + "##create_" + std::to_string(asset_index);
-                if (ImGui::MenuItem(label.c_str())) {
-                    Entity entity = make_entity_from_asset(editor.scene, asset);
-                    const MeshComponent* mesh = entity.get_mesh_component();
-                    if (!mesh || !has_valid_model_data(mesh->model)) continue;
-                    editor.scene.entities.push_back(entity);
-                }
-            }
-            ImGui::EndMenu();
-        }
-        
-        ImGui::Separator();
-        if (ImGui::MenuItem(lang.word("create_group"))) {
-            editor.save_state();
-            create_group(editor.scene, "Group", -1);
-        }
-        
+        draw_create_menu(-1);
+
         ImGui::EndPopup();
     }
     
