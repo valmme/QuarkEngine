@@ -34,6 +34,8 @@ struct CommandLineOptions {
 
     bool help_requested = false;
     bool version_requested = false;
+
+    int dump_frames = 0;
 };
 
 CommandLineOptions parse_command_line(int argc, char** argv);

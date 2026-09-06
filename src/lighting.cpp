@@ -25,6 +25,10 @@ void update_lighting(Shader shader, Lighting& l) {
     float intensity = l.intensity;
     float range = l.range;
 
+    l.light.attenuation = 1.0f / (range * range > 0.0001f ? range * range : 0.0001f);
+    if (l.light.attenuationLoc >= 0)
+        SetShaderValue(shader, l.light.attenuationLoc, &l.light.attenuation, SHADER_UNIFORM_FLOAT);
+
     int intensity_loc = GetShaderLocation(shader, TextFormat("lights[%i].intensity", l.id));
     int range_loc = GetShaderLocation(shader, TextFormat("lights[%i].range", l.id));
 

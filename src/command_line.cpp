@@ -31,7 +31,8 @@ void print_usage(const char* program_name) {
         "Misc:\n"
         "  --lang <code>               Override the editor language\n"
         "  --log-level <level>         Set log verbosity (trace|info|warn|error)\n"
-        "  --no-autosave                Disable autosave for this session\n";
+        "  --no-autosave                Disable autosave for this session\n"
+        "  --dump-frame [n]             Print full render state for the first n frames, then exit (debug)\n";
 }
 
 static bool has_value(int argc, char** argv, int index) {
@@ -93,6 +94,17 @@ CommandLineOptions parse_command_line(int argc, char** argv) {
         } else if (argument == "--log-level") {
             if (has_value(argc, argv, argument_index))
                 options.log_level = argv[++argument_index];
+        } else if (argument == "--dump-frame") {
+            if (has_value(argc, argv, argument_index)) {
+                try {
+                    options.dump_frames = std::stoi(argv[argument_index + 1]);
+                    if (options.dump_frames > 0) ++argument_index;
+                } catch (...) {
+                    options.dump_frames = 2;
+                }
+            } else {
+                options.dump_frames = 2;
+            }
         } else if (options.project_path.empty()) {
             options.project_path = argument;
         }

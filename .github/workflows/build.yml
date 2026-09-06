@@ -68,14 +68,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "$src/*" dist/ -Recurse -Force
 
-          $compiler = Get-Command g++.exe -ErrorAction SilentlyContinue
-          if ($null -ne $compiler) {
-            $compilerDir = Split-Path $compiler.Source
-            foreach ($runtime in @("libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll")) {
-              Copy-Item (Join-Path $compilerDir $runtime) dist/ -Force -ErrorAction SilentlyContinue
-            }
-          }
-
           if (!(Test-Path "dist/QuarkEngine.exe")) {
             throw "QuarkEngine.exe was not staged"
           }

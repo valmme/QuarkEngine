@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 project(QuarkEngine)
 
+if(MSVC)
+    set(CMAKE_CXX_FLAGS_RELEASE "/MD /Od /RTC1 /DNDEBUG" CACHE STRING "" FORCE)
+    set(CMAKE_C_FLAGS_RELEASE   "/MD /Od /RTC1 /DNDEBUG" CACHE STRING "" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

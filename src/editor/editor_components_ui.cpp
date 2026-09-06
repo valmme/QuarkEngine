@@ -646,6 +646,22 @@ void ComponentUIHelper::draw_light_component(Editor& editor, Entity& entity, Lig
     }
     changed |= ImGui::DragFloat3(lang.word("target"), (float*)&light->light.target, 0.1f);
 
+    float light_color[4] = {
+        light->light.color.r / 255.0f,
+        light->light.color.g / 255.0f,
+        light->light.color.b / 255.0f,
+        light->light.color.a / 255.0f
+    };
+    if (ImGui::ColorEdit4(lang.word("color"), light_color)) {
+        light->light.color = {
+            static_cast<unsigned char>(light_color[0] * 255.0f),
+            static_cast<unsigned char>(light_color[1] * 255.0f),
+            static_cast<unsigned char>(light_color[2] * 255.0f),
+            static_cast<unsigned char>(light_color[3] * 255.0f)
+        };
+        changed = true;
+    }
+
     changed |= ImGui::DragFloat(lang.word("intensity"), &light->light.intensity, 0.1f, 0.0f, 10.0f);
     changed |= ImGui::DragFloat(lang.word("range"), &light->light.range, 0.1f, 0.1f, 100.0f);
     changed |= ImGui::DragFloat(lang.word("spot_angle"), &light->light.spot_angle, 1.0f, 5.0f, 180.0f);

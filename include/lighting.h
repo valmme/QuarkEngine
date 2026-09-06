@@ -20,9 +20,9 @@ struct Lighting {
     Vec3 rotation;
 
     Color color = WHITE;
-    bool enabled;
+    bool enabled = true;
 
-    float spot_angle;
+    float spot_angle = 30.0f;
     int spot_angle_loc = -1;
     int intensity_loc = -1;
     int range_loc = -1;

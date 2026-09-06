@@ -343,7 +343,9 @@ static void render_scene_shadow_maps(Scene& scene, Shader shadow_shader,
             rendered[light->light.id]) continue;
 
         const int slot = light->light.id;
-        shadow_cameras[slot].position = transform->position;
+        const int light_entity_index = static_cast<int>(&entity - scene.entities.data());
+        const Mat4 light_transform = compose_entity_transform(scene, light_entity_index);
+        shadow_cameras[slot].position = Vec3(light_transform * Vec3{0.0f, 0.0f, 0.0f});
         shadow_cameras[slot].target = light->light.target;
         if ((shadow_cameras[slot].position - shadow_cameras[slot].target).length() <= 0.000001f) {
             shadow_cameras[slot].target = scene_center;

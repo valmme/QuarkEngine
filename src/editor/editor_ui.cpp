@@ -502,6 +502,7 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
 
     ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
     ImGuizmo::SetRect(g_scene_window_pos.x, g_scene_window_pos.y, g_scene_window_size.x, g_scene_window_size.y);
+    ImGuizmo::AllowAxisFlip(false);
 
     float translation_snap[3] = {
         g_editor_preferences.gizmo_translation_snap,
@@ -647,7 +648,8 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
         if (parent_id >= 0 && parent_id < static_cast<int>(editor.scene.entities.size())) {
             std::vector<int> stack;
             const Mat4 parent_world = compose_entity_world_transform_Mat4(editor.scene, parent_id, stack);
-            const Mat4 world_transform = *reinterpret_cast<const Mat4*>(transform_Mat4);
+            Mat4 world_transform = Mat4::identity();
+            memcpy(&world_transform, transform_Mat4, sizeof(transform_Mat4));
             const Mat4 local_transform = parent_world.inverted() * world_transform;
             memcpy(transform_Mat4, &local_transform, sizeof(transform_Mat4));
         }
