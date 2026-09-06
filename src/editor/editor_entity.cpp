@@ -22,7 +22,7 @@ Entity make_entity_from_asset(Scene& scene, ModelAsset& asset) {
     mesh->asset = &asset;
     mesh->asset_name = asset.name;
     mesh->segments = 16;
-    const std::string base_name = asset.is_procedural ? object_type_name(asset.type) : fs::path(asset.name).stem().string();
+    const std::string base_name = asset.is_procedural ? asset.name : fs::path(asset.name).stem().string();
     entity.name = scene.make_unique_name(base_name.empty() ? "Model" : base_name);
 
     auto mat_comp = std::make_shared<MaterialComponent>();

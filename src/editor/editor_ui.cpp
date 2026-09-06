@@ -1291,6 +1291,35 @@ void paste_entity(Editor& editor) {
     }
 }
 
+namespace {
+std::string make_duplicate_name(const Scene& scene, const std::string& name) {
+    std::string base = name;
+    int start = 1;
+    const size_t open = name.find(" (");
+    if (open != std::string::npos && open + 2 < name.size() && name.back() == ')') {
+        int value = 0;
+        bool numeric = true;
+        for (size_t i = open + 2; i + 1 < name.size(); ++i) {
+            const char c = name[i];
+            if (c >= '0' && c <= '9') value = value * 10 + (c - '0');
+            else { numeric = false; break; }
+        }
+        if (numeric) {
+            base = name.substr(0, open);
+            start = value + 1;
+        }
+    }
+    auto is_taken = [&](const std::string& candidate) {
+        for (const auto& e : scene.entities) if (e.name == candidate) return true;
+        return false;
+    };
+    for (int suffix = start; ; ++suffix) {
+        const std::string candidate = base + " (" + std::to_string(suffix) + ")";
+        if (!is_taken(candidate)) return candidate;
+    }
+}
+}
+
 Entity clone_entity_instance(const Entity& source, Scene& scene) {
     Entity copy = source;
     MeshComponent* mesh = copy.get_mesh_component();
@@ -1328,7 +1357,7 @@ Entity clone_entity_instance(const Entity& source, Scene& scene) {
     }
 
     copy.id = static_cast<int>(scene.entities.size());
-    copy.name = scene.make_default_name_for(copy);
+    copy.name = make_duplicate_name(scene, copy.name);
     return copy;
 }
 
@@ -1810,14 +1839,24 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
             inspector_name[copied] = '\0';
 
             static std::string last_name;
+            static int rename_entity_id = -1;
+            static bool rename_state_saved = false;
             if (ImGui::InputText(lang.word("name"), inspector_name, IM_ARRAYSIZE(inspector_name))) {
                 if (last_name != inspector_name) {
-                    editor.save_state();
+                    if (!rename_state_saved || rename_entity_id != entity->id) {
+                        editor.save_state();
+                        rename_state_saved = true;
+                        rename_entity_id = entity->id;
+                    }
                     assign_entity_name(*entity, inspector_name);
                     last_name = inspector_name;
                 }
             } else {
                 last_name = inspector_name;
+            }
+            if (!ImGui::IsItemActive()) {
+                rename_state_saved = false;
+                rename_entity_id = -1;
             }
 
             ImGui::Spacing();
@@ -1934,6 +1973,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
         ImGui::InputText("##rename", rename_buf, IM_ARRAYSIZE(rename_buf));
         if (ImGui::Button(lang.word("ok"))) {
             if (renaming_index >= 0 && renaming_index < static_cast<int>(editor.scene.entities.size())) {
+                editor.save_state();
                 assign_entity_name(editor.scene.entities[renaming_index], rename_buf);
             }
             renaming_index = -1;
