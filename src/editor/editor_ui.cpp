@@ -496,8 +496,8 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
     }
     TransformComponent* transform = entity->get_transform_component();
     MeshComponent* mesh = entity->get_mesh_component();
-    if (!transform || !mesh) return;
-    if (mesh->vertex_gizmo) return;
+    if (!transform) return;
+    if (mesh && mesh->vertex_gizmo) return;
     if (g_scene_window_size.x <= 0 || g_scene_window_size.y <= 0) return;
 
     ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
@@ -544,7 +544,7 @@ void draw_gizmo(Editor& editor, FlyCamera camera) {
 
     draw_mesh_vertex_overlay(editor, camera.get_camera());
 
-    if (g_mesh_edit_state.enabled && has_valid_model_data(mesh->model)) {
+    if (mesh && g_mesh_edit_state.enabled && has_valid_model_data(mesh->model)) {
         if (g_mesh_edit_state.mesh_index >= mesh->model.meshCount) 
             g_mesh_edit_state.mesh_index = 0;
 
@@ -1561,6 +1561,13 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                     }
                 }
             }
+            ImGui::Separator();
+            if (ImGui::MenuItem(lang.word("light"))) {
+                editor.save_state();
+                Entity created = make_light_entity(editor.scene, -1);
+                editor.scene.entities.push_back(created);
+                editor.scene.selected = static_cast<int>(editor.scene.entities.size()) - 1;
+            }
             ImGui::EndMenu();
         }
 
@@ -1625,6 +1632,13 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                     entity.parent_id = parent_index;
                     editor.scene.entities.push_back(entity);
                 }
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem(lang.word("light"))) {
+                editor.save_state();
+                Entity entity = make_light_entity(editor.scene, parent_index);
+                editor.scene.entities.push_back(entity);
+                editor.scene.selected = static_cast<int>(editor.scene.entities.size()) - 1;
             }
             ImGui::EndMenu();
         }

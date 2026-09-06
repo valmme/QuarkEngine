@@ -82,6 +82,27 @@ Entity make_entity_from_asset(Scene& scene, ModelAsset& asset) {
     return entity;
 }
 
+Entity make_light_entity(Scene& scene, int parent_index) {
+    Entity entity;
+    entity.name = scene.make_unique_name("Light");
+    entity.id = static_cast<int>(scene.entities.size());
+    entity.parent_id = parent_index;
+
+    ComponentManager* cm = entity.get_components();
+    for (size_t i = 0; i < cm->get_component_count(); ++i) {
+        if (cm->get_component(i)->get_type() == COMPONENT_MESH) {
+            cm->remove_component(i);
+            break;
+        }
+    }
+
+    auto light = std::make_shared<LightComponent>();
+    light->light = create_lighting({0, 0, 0}, WHITE);
+    cm->add_component(light);
+
+    return entity;
+}
+
 void make_prefab(Entity entity, const fs::path path) {
     nlohmann::json j;
 

@@ -9,6 +9,8 @@ namespace fs = std::filesystem;
 
 Entity make_entity_from_asset(Scene& scene, ModelAsset& asset);
 
+Entity make_light_entity(Scene& scene, int parent_index);
+
 void assign_entity_name(Entity& entity, const char* new_name);
 
 void make_prefab(Entity entity, const fs::path path);

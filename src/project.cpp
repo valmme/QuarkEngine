@@ -265,14 +265,34 @@ bool project_load(const std::string& folder_path, Scene& scene, Shader shader) {
         }
 
         if (!e.components->get_transform()) e.components->add_component(std::make_shared<TransformComponent>());
-        if (!e.components->get_mesh()) e.components->add_component(std::make_shared<MeshComponent>());
-        if (!e.components->get_material()) e.components->add_component(std::make_shared<MaterialComponent>());
+        if (!e.get_light_component()) {
+            if (!e.components->get_mesh()) e.components->add_component(std::make_shared<MeshComponent>());
+            if (!e.components->get_material()) e.components->add_component(std::make_shared<MaterialComponent>());
+        }
 
         MeshComponent* mesh = e.get_mesh_component();
         TransformComponent* transform = e.get_transform_component();
         MaterialComponent* mat = e.get_material_component();
         LightComponent* light = e.get_light_component();
-        if (!mesh || !transform) continue;
+        if (!transform) continue;
+
+        if (!mesh) {
+            if (light) {
+                const int light_type = light->light.light.type;
+                light->created = false;
+                light->light.id = -1;
+                light->light.light = {};
+                light->light.light.type = light_type;
+                if (light->enabled) {
+                    light->light.enabled = true;
+                    if (light->light.position.x == 0.0f && light->light.position.y == 0.0f && light->light.position.z == 0.0f) {
+                        light->light.position = transform->position;
+                    }
+                }
+                scene.entities.push_back(std::move(e));
+            }
+            continue;
+        }
 
         if (!mesh->asset_name.empty()) {
             for (auto& a : assets) {

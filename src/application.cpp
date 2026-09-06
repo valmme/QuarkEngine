@@ -833,6 +833,7 @@ void Application::render_frame() {
                     }
                 }
                 if (g_editor_preferences.show_light_helpers) {
+                    static Texture2D light_helper_texture = LoadTexture("assets/light_helper.png");
                     for (int entity_index = 0; entity_index < static_cast<int>(editor.scene.entities.size()); ++entity_index) {
                         auto& entity = editor.scene.entities[entity_index];
                         LightComponent* light = entity.get_light_component();
@@ -840,7 +841,21 @@ void Application::render_frame() {
                         if (!light || !transform || !light->enabled) continue;
                         const Mat4 world_transform = compose_entity_transform(editor.scene, entity_index);
                         const Vec3 world_position = Vec3(world_transform * Vec3{0.0f, 0.0f, 0.0f});
-                        DrawSphere(world_position, 0.15f, light->light.color);
+                        if (light_helper_texture.id != 0) {
+                            const float helper_size_px = 96.0f;
+                            DrawBillboardPro(
+                                camera.get_camera(),
+                                light_helper_texture,
+                                {0.0f, 0.0f, static_cast<float>(light_helper_texture.width), static_cast<float>(light_helper_texture.height)},
+                                world_position,
+                                {0.0f, 1.0f, 0.0f},
+                                {helper_size_px, helper_size_px * static_cast<float>(light_helper_texture.height) / static_cast<float>(light_helper_texture.width)},
+                                {0.5f, 0.5f},
+                                90.0f,
+                                WHITE);
+                        } else {
+                            DrawSphere(world_position, 0.15f, light->light.color);
+                        }
                         DrawLine3D(world_position, light->light.target, light->light.color);
                     }
                 }
