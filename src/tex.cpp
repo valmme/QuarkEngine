@@ -366,16 +366,15 @@ void draw_collision_debug(Entity& entity) {
 
     Vec3 worldPos = transform->position + collision->center;
 
-    Mat4 matScale;
-    matScale.scale(transform->scale.x, transform->scale.y, transform->scale.z);
-    Mat4 matRotX;
-    matRotX.rotationX(DEG2RAD * transform->rotation.x);
-    Mat4 matRotY;
-    matRotY.rotationY(DEG2RAD * transform->rotation.y);
-    Mat4 matRotZ;
-    matRotZ.rotationZ(DEG2RAD * transform->rotation.z);
-    Mat4 matTrans;
-    matTrans.translation(worldPos.x, worldPos.y, worldPos.z);
+    Mat4 matScale = Mat4::scale(
+        transform->scale.x,
+        transform->scale.y,
+        transform->scale.z
+    );
+    Mat4 matRotX = Mat4::rotationX(DEG2RAD * transform->rotation.x);
+    Mat4 matRotY = Mat4::rotationY(DEG2RAD * transform->rotation.y);
+    Mat4 matRotZ = Mat4::rotationZ(DEG2RAD * transform->rotation.z);
+    Mat4 matTrans = Mat4::translation(worldPos.x, worldPos.y, worldPos.z);
 
     Mat4 world =
         matScale *
