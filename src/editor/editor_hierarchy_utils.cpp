@@ -1,6 +1,5 @@
 #include "editor/editor_hierarchy_utils.h"
 #include "imgui.h"
-#include "ImGuizmo.h"
 #include <algorithm>
 #include <cmath>
 
@@ -34,15 +33,103 @@ static Mat4 compose_world_transform(const Scene& scene, int entity_index) {
     return compose_world_transform(scene, entity_index, stack);
 }
 
-static void decompose_transform(const Mat4& matrix, TransformComponent& transform) {
-    float components[3][3] = {};
-    float values[16] = {};
-    std::copy(std::begin(matrix.m), std::end(matrix.m), std::begin(values));
-    ImGuizmo::DecomposeMatrixToComponents(
-        values, components[0], components[1], components[2]);
-    transform.position = {components[0][0], components[0][1], components[0][2]};
-    transform.rotation = {components[1][0], components[1][1], components[1][2]};
-    transform.scale = {components[2][0], components[2][1], components[2][2]};
+static Vec3 normalize_or_forward(const Vec3& v) {
+    const float length = v.length();
+    if (length < 1e-9f) return Vec3{0.0f, 1.0f, 0.0f};
+    return v * (1.0f / length);
+}
+
+static Vec3 matrix_column(const Mat4& matrix, int column) {
+    return Vec3{matrix.m[column * 4], matrix.m[column * 4 + 1], matrix.m[column * 4 + 2]};
+}
+
+static float vec3_dot(const Vec3& a, const Vec3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+static float vec3_squared_length(const Vec3& v) {
+    return v.x * v.x + v.y * v.y + v.z * v.z;
+}
+
+static Mat4 polar_rotation(const Mat4& matrix) {
+    Mat4 q = matrix;
+    for (int iteration = 0; iteration < 24; ++iteration) {
+        const Mat4 inverted = q.inverted();
+        const Mat4 inverted_transpose = Mat4Transpose(inverted);
+        for (int i = 0; i < 16; ++i) q.m[i] = 0.5f * (q.m[i] + inverted_transpose.m[i]);
+    }
+    for (int column = 0; column < 3; ++column) {
+        const Vec3 axis = normalize_or_forward(matrix_column(q, column));
+        q.m[column * 4] = axis.x;
+        q.m[column * 4 + 1] = axis.y;
+        q.m[column * 4 + 2] = axis.z;
+    }
+    return q;
+}
+
+static void decompose_transform(const Mat4& parent_transform, const Mat4& world_transform, TransformComponent& transform) {
+    const Mat4 local = parent_transform.inverted() * world_transform;
+    transform.position = {local.m[12], local.m[13], local.m[14]};
+
+    Mat4 parent_3x3{};
+    Mat4 world_3x3{};
+    for (int column = 0; column < 3; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            parent_3x3.m[column * 4 + row] = parent_transform.m[column * 4 + row];
+            world_3x3.m[column * 4 + row] = world_transform.m[column * 4 + row];
+        }
+    }
+
+    Vec3 scale = {
+        matrix_column(local, 0).length(),
+        matrix_column(local, 1).length(),
+        matrix_column(local, 2).length()
+    };
+    if (scale.x < 1e-6f) scale.x = 1.0f;
+    if (scale.y < 1e-6f) scale.y = 1.0f;
+    if (scale.z < 1e-6f) scale.z = 1.0f;
+
+    for (int iteration = 0; iteration < 16; ++iteration) {
+        Mat4 inverse_scale{};
+        inverse_scale.m[0] = (scale.x > 1e-6f) ? 1.0f / scale.x : 1.0f;
+        inverse_scale.m[5] = (scale.y > 1e-6f) ? 1.0f / scale.y : 1.0f;
+        inverse_scale.m[10] = (scale.z > 1e-6f) ? 1.0f / scale.z : 1.0f;
+
+        Mat4 rotation = polar_rotation(Mat4Transpose(parent_3x3) * world_3x3 * inverse_scale);
+
+        const Mat4 scaled_rotation = parent_3x3 * rotation;
+        for (int column = 0; column < 3; ++column) {
+            const Vec3 a = matrix_column(scaled_rotation, column);
+            const Vec3 b = matrix_column(world_3x3, column);
+            const float denominator = vec3_squared_length(a);
+            float next = (denominator > 1e-6f) ? vec3_dot(a, b) / denominator : 0.0f;
+            if (next < 0.0f) next = 0.0f;
+            if (column == 0) scale.x = next;
+            else if (column == 1) scale.y = next;
+            else scale.z = next;
+        }
+
+        if (iteration == 15) {
+            const Vec3 right = matrix_column(rotation, 0);
+            const Vec3 up = matrix_column(rotation, 1);
+            const Vec3 dir = matrix_column(rotation, 2);
+            transform.rotation = {
+                atan2f(-dir.y, dir.z) * RAD2DEG,
+                asinf(dir.x) * RAD2DEG,
+                atan2f(-up.x, right.x) * RAD2DEG
+            };
+        }
+    }
+    transform.scale = scale;
+
+    constexpr float kEpsilon = 0.0001f;
+    auto cleanup = [](float& value) {
+        if (fabsf(value) < kEpsilon) value = 0.0f;
+        if (fabsf(value - 1.0f) < kEpsilon) value = 1.0f;
+    };
+    cleanup(transform.position.x); cleanup(transform.position.y); cleanup(transform.position.z);
+    cleanup(transform.rotation.x); cleanup(transform.rotation.y); cleanup(transform.rotation.z);
+    cleanup(transform.scale.x); cleanup(transform.scale.y); cleanup(transform.scale.z);
 }
 
 std::vector<int> get_entity_children(const Scene& scene, int parent_id) {
@@ -86,17 +173,13 @@ void move_entity_to_parent(Scene& scene, int entity_id, int new_parent_id) {
     }
     
     const Mat4 world_transform = compose_world_transform(scene, entity_id);
-    const Vec3 world_position = world_transform * Vec3{0.0f, 0.0f, 0.0f};
     const Mat4 parent_transform = new_parent_id >= 0
         ? compose_world_transform(scene, new_parent_id)
         : Mat4::identity();
-    const Mat4 inverse_parent_transform = parent_transform.inverted();
-    const Mat4 local_transform = inverse_parent_transform * world_transform;
 
     scene.entities[entity_id].parent_id = new_parent_id;
     if (TransformComponent* transform = scene.entities[entity_id].get_transform_component()) {
-        decompose_transform(local_transform, *transform);
-        transform->position = inverse_parent_transform * world_position;
+        decompose_transform(parent_transform, world_transform, *transform);
     }
 }
 

@@ -84,84 +84,71 @@ void ComponentUIHelper::draw_entity_inspector(Editor& editor, Entity& entity, Sh
         if (ImGui::BeginPopup("AddComponentPopup")) {
             auto components_manager = entity.get_components();
 
-            if (ImGui::MenuItem(lang.word("material"))) {
-                editor.save_state();
-                bool already_exists = false;
-                
+            const bool has_material = [&]() {
                 for (size_t j = 0; j < components_manager->get_component_count(); ++j) {
                     auto existing = components_manager->get_component(j);
-                    if (existing && existing->get_type() == COMPONENT_MATERIAL) {
-                        already_exists = true;
-                        break;
-                    }
+                    if (existing && existing->get_type() == COMPONENT_MATERIAL) return true;
                 }
-
-                if (!already_exists) {
+                return false;
+            }();
+            if (ImGui::MenuItem(lang.word("material"))) {
+                if (!has_material) {
+                    editor.save_component_state(static_cast<int>(&entity - editor.scene.entities.data()));
                     components_manager->add_component(std::make_shared<MaterialComponent>());
                 }
-
-                else { editor.undo(); }
             }
 
-            if (ImGui::MenuItem(lang.word("collision"))) {
-                editor.save_state();
-                bool already_exists = false;
-
+            const bool has_collision = [&]() {
                 for (size_t j = 0; j < components_manager->get_component_count(); ++j) {
                     auto existing = components_manager->get_component(j);
-                    if (existing && existing->get_type() == COMPONENT_COLLISION) {
-                        already_exists = true;
-                        break;
-                    }
+                    if (existing && existing->get_type() == COMPONENT_COLLISION) return true;
                 }
-
-                if (!already_exists) {
+                return false;
+            }();
+            if (ImGui::MenuItem(lang.word("collision"))) {
+                if (!has_collision) {
+                    editor.save_component_state(static_cast<int>(&entity - editor.scene.entities.data()));
                     components_manager->add_component(std::make_shared<CollisionComponent>());
                 }
             }
 
-            if (ImGui::MenuItem(lang.word("light"))) {
-                editor.save_state();
-                bool already_exists = false;
-
+            const bool has_light = [&]() {
                 for (size_t j = 0; j < components_manager->get_component_count(); ++j) {
                     auto existing = components_manager->get_component(j);
-                    if (existing && existing->get_type() == COMPONENT_LIGHT) {
-                        already_exists = true;
-                        break;
-                    }
+                    if (existing && existing->get_type() == COMPONENT_LIGHT) return true;
                 }
-                if (!already_exists) {
+                return false;
+            }();
+            if (ImGui::MenuItem(lang.word("light"))) {
+                if (!has_light) {
+                    editor.save_component_state(static_cast<int>(&entity - editor.scene.entities.data()));
                     auto light = std::make_shared<LightComponent>();
                     if (auto transform = entity.get_transform_component()) {
                         light->light.position = transform->position;
                     }
                     components_manager->add_component(light);
-                } else { editor.undo(); }
+                }
             }
 
-            if (ImGui::MenuItem(lang.word("text"))) {
-                editor.save_state();
-                bool already_exists = false;
-
+            const bool has_text = [&]() {
                 for (size_t j = 0; j < components_manager->get_component_count(); ++j) {
                     auto existing = components_manager->get_component(j);
-                    if (existing && existing->get_type() == COMPONENT_CUSTOM) {
-                        already_exists = true;
-                        break;
-                    }
-
+                    if (existing && existing->get_type() == COMPONENT_CUSTOM) return true;
                 }
-
-                if (!already_exists) {
-                    auto text = std::make_shared<Text3DComponent>();
-                    components_manager->add_component(text);
-                } else { editor.undo(); }
+                return false;
+            }();
+            if (ImGui::MenuItem(lang.word("text"))) {
+                if (!has_text) {
+                    editor.save_component_state(static_cast<int>(&entity - editor.scene.entities.data()));
+                    components_manager->add_component(std::make_shared<Text3DComponent>());
+                }
             }
             ImGui::EndPopup();
         }
 
         if (component_to_remove != -1) {
+            const int entity_index = static_cast<int>(&entity - editor.scene.entities.data());
+            editor.save_component_state(entity_index);
             std::shared_ptr<Component> comp = components_manager->get_component(component_to_remove);
 
             if (std::shared_ptr<LightComponent> light = std::dynamic_pointer_cast<LightComponent>(comp)) {
@@ -555,7 +542,12 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
         if (selected_texture_index == 0) {
             mat->albedo_texture_name.clear();
             mat->texture = {0};
-            if (mat->texture_name.empty()) mat->texture_source = TEXTURE_NONE;
+            if (mat->texture_name.empty()) {
+                mat->texture_source = TEXTURE_NONE;
+                clear_material_textures(&entity);
+            } else if (std::filesystem::exists(mat->texture_name)) {
+                load_material_to_entity(&entity, mat->texture_name);
+            }
         } else {
             mat->albedo_texture_name = texture_options[selected_texture_index].name;
             mat->texture_name.clear();
@@ -563,6 +555,36 @@ void ComponentUIHelper::draw_material_component(Editor& editor, Entity& entity, 
             mat->texture_source = TEXTURE_EXTERNAL;
         }
         mark_entity_uv_dirty(&entity);
+    }
+
+    static int selected_normal_index = 0;
+    selected_normal_index = 0;
+    for (size_t i = 0; i < texture_options.size(); ++i) {
+        if (texture_options[i].name == mat->normal_texture_name) {
+            selected_normal_index = static_cast<int>(i);
+            break;
+        }
+    }
+    ImGui::Text("Normal map");
+    if (!texture_names.empty() && ImGui::Combo("##normal_map", &selected_normal_index,
+        texture_names.data(), static_cast<int>(texture_names.size()))) {
+        editor.save_material_state();
+        if (selected_normal_index == 0) {
+            mat->normal_texture_name.clear();
+            for (int m = 0; m < mesh->model.materialCount; ++m) {
+                if (mesh->model.materials[m].maps) {
+                    mesh->model.materials[m].maps[MATERIAL_MAP_NORMAL].texture = {0};
+                }
+            }
+        } else {
+            mat->normal_texture_name = texture_options[selected_normal_index].name;
+            const Texture2D normal_texture = texture_options[selected_normal_index].texture;
+            for (int m = 0; m < mesh->model.materialCount; ++m) {
+                if (mesh->model.materials[m].maps) {
+                    mesh->model.materials[m].maps[MATERIAL_MAP_NORMAL].texture = normal_texture;
+                }
+            }
+        }
     }
 
     if (!mat->texture_name.empty() && mat->texture_name.length() > 4 && 

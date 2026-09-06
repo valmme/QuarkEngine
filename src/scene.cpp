@@ -82,9 +82,12 @@ void Scene::release_resources() {
                 UnloadModel(mesh->model);
             }
         }
+        mesh->model = {};
+        mesh->owns_model_instance = false;
         if (mat) mat->texture = {0};
     }
 
     entities.clear();
     selected = -1;
+    selected_entities.clear();
 }

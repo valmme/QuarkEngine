@@ -833,7 +833,6 @@ void Application::render_frame() {
                     }
                 }
                 if (g_editor_preferences.show_light_helpers) {
-                    static Texture2D light_helper_texture = LoadTexture("assets/light_helper.png");
                     for (int entity_index = 0; entity_index < static_cast<int>(editor.scene.entities.size()); ++entity_index) {
                         auto& entity = editor.scene.entities[entity_index];
                         LightComponent* light = entity.get_light_component();
@@ -841,21 +840,6 @@ void Application::render_frame() {
                         if (!light || !transform || !light->enabled) continue;
                         const Mat4 world_transform = compose_entity_transform(editor.scene, entity_index);
                         const Vec3 world_position = Vec3(world_transform * Vec3{0.0f, 0.0f, 0.0f});
-                        if (light_helper_texture.id != 0) {
-                            const float helper_size_px = 96.0f;
-                            DrawBillboardPro(
-                                camera.get_camera(),
-                                light_helper_texture,
-                                {0.0f, 0.0f, static_cast<float>(light_helper_texture.width), static_cast<float>(light_helper_texture.height)},
-                                world_position,
-                                {0.0f, 1.0f, 0.0f},
-                                {helper_size_px, helper_size_px * static_cast<float>(light_helper_texture.height) / static_cast<float>(light_helper_texture.width)},
-                                {0.5f, 0.5f},
-                                90.0f,
-                                WHITE);
-                        } else {
-                            DrawSphere(world_position, 0.15f, light->light.color);
-                        }
                         DrawLine3D(world_position, light->light.target, light->light.color);
                     }
                 }
@@ -879,6 +863,59 @@ void Application::render_frame() {
                     }
                 }
             EndMode3D();
+
+            if (g_editor_preferences.show_light_helpers && g_scene_window_size.x > 0.0f && g_scene_window_size.y > 0.0f) {
+                static Texture2D light_helper_texture = LoadTexture("assets/light_helper.png");
+                if (light_helper_texture.id != 0) {
+                    const Camera3D& editor_camera = camera.get_camera();
+                    const Mat4 view = Mat4::lookAt(editor_camera.position, editor_camera.target, editor_camera.up);
+                    const Mat4 projection = Mat4::perspective(
+                        editor_camera.fovy * DEG2RAD,
+                        g_scene_window_size.x / g_scene_window_size.y,
+                        0.1f,
+                        1000.0f
+                    );
+                    const float tex_w = static_cast<float>(light_helper_texture.width);
+                    const float tex_h = static_cast<float>(light_helper_texture.height);
+                    const float aspect = tex_h / tex_w;
+                    const float helper_world_size = 0.8f;
+                    const float helper_max_px = g_scene_window_size.y * 0.2f;
+                    const float fov_scale = tanf(editor_camera.fovy * DEG2RAD * 0.5f);
+
+                    for (int entity_index = 0; entity_index < static_cast<int>(editor.scene.entities.size()); ++entity_index) {
+                        auto& entity = editor.scene.entities[entity_index];
+                        LightComponent* light = entity.get_light_component();
+                        TransformComponent* transform = entity.get_transform_component();
+                        if (!light || !transform || !light->enabled) continue;
+                        const Mat4 world_transform = compose_entity_transform(editor.scene, entity_index);
+                        const Vec3 world_pos = Vec3(world_transform * Vec3{0.0f, 0.0f, 0.0f});
+
+                        const Vec4 clip = projection * (view * Vec4{world_pos.x, world_pos.y, world_pos.z, 1.0f});
+                        if (clip.w <= 0.000001f) continue;
+                        const float nx = clip.x / clip.w * 0.5f + 0.5f;
+                        const float ny = -clip.y / clip.w * 0.5f + 0.5f;
+                        if (nx < -0.2f || nx > 1.2f || ny < -0.2f || ny > 1.2f) continue;
+                        const float sx = nx * static_cast<float>(scene_rt.texture.width);
+                        const float sy = ny * static_cast<float>(scene_rt.texture.height);
+
+                        const Vec3 to_camera = editor_camera.position - world_pos;
+                        float dist = to_camera.length();
+                        if (dist < 0.0001f) dist = 0.0001f;
+                        const float pixels_per_meter = (g_scene_window_size.y * 0.5f) / (fov_scale * dist);
+                        float helper_h = helper_world_size * pixels_per_meter;
+                        if (helper_h > helper_max_px) helper_h = helper_max_px;
+                        const float helper_w = helper_h / aspect;
+
+                        DrawTexturePro(
+                            light_helper_texture,
+                            {0.0f, 0.0f, tex_w, tex_h},
+                            {sx, sy, helper_w, helper_h},
+                            {helper_w * 0.5f, helper_h * 0.5f},
+                            0.0f,
+                            WHITE);
+                    }
+                }
+            }
             EndTextureMode();
         }
 

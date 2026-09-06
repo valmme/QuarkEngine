@@ -84,14 +84,14 @@ static fs::path resolve_project_root_path(const fs::path& input_path) {
     return p;
 }
 
-static bool write_project_manifest(const fs::path& root_path) {
+static bool write_project_manifest(const fs::path& root_path, const std::string& scene_file = "scene.json") {
     fs::create_directories(root_path);
 
     json manifest;
     manifest["format"] = "quark-project";
     manifest["version"] = QUARK_ENGINE_VERSION;
     manifest["name"] = root_path.filename().string();
-    manifest["scene"] = "scene.json";
+    manifest["scene"] = scene_file;
     manifest["resources"] = "resources";
 
     const fs::path manifest_path = project_manifest_path_for_root(root_path);
@@ -193,6 +193,43 @@ void project_save(const std::string& folder_path, const Scene& scene) {
     f << j.dump(4);
     f.close();
     write_project_manifest(root_path);
+}
+
+void project_save_scene(const std::string& scene_file_path, const Scene& scene) {
+    const fs::path scene_path = fs::absolute(fs::path(scene_file_path));
+    const fs::path root_path = scene_path.parent_path();
+    if (root_path.empty()) {
+        TraceLog(LogLevel::Error, "PROJECT", "Failed to save scene: empty parent directory");
+        return;
+    }
+    fs::create_directories(root_path / "resources");
+
+    json j;
+    j["entities"] = json::array();
+    j["version"] = QUARK_ENGINE_VERSION;
+
+    for (const auto& e : scene.entities) {
+        json ej;
+        ej["name"] = e.name;
+        ej["tags"] = e.tags;
+        ej["is_group"] = e.is_group;
+        ej["parent_id"] = e.parent_id;
+
+        if (e.components) {
+            e.components->serialize(ej);
+        }
+
+        j["entities"].push_back(ej);
+    }
+
+    std::ofstream f(scene_path);
+    if (!f.is_open()) {
+        TraceLog(LogLevel::Error, "PROJECT", TextFormat("Failed to open scene file for writing: %s", scene_file_path.c_str()));
+        return;
+    }
+    f << j.dump(4);
+    f.close();
+    write_project_manifest(root_path, scene_path.filename().string());
 }
 
 bool project_load(const std::string& folder_path, Scene& scene, Shader shader) {
@@ -367,6 +404,14 @@ bool project_load(const std::string& folder_path, Scene& scene, Shader shader) {
             mesh->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
             if (mat->texture.id != 0) {
                 mesh->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].texture = mat->texture;
+            }
+            if (!mat->normal_texture_name.empty()) {
+                for (const auto& option : texture_options) {
+                    if (option.name == mat->normal_texture_name) {
+                        mesh->model.materials[i].maps[MATERIAL_MAP_NORMAL].texture = option.texture;
+                        break;
+                    }
+                }
             }
             mesh->model.materials[i].shader = &shader;
         }

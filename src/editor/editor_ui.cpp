@@ -5,8 +5,7 @@
 #define ShowCursor WinShowCursor
 #define Rectangle WinRectangle
 #include <windows.h>
-#include <shlobj.h>
-#include <ole2.h>
+#include <commdlg.h>
 #undef CloseWindow
 #undef ShowCursor
 #undef Rectangle
@@ -31,6 +30,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <cstring>
+#include <cstdio>
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
@@ -44,21 +44,94 @@
 
 #define lang LanguageManager::get()
 
-static std::string browse_project_folder() {
+static const char* kSceneExtension = ".scene";
+
+static std::string native_save_file_dialog(const char* filter_label, const char* filter,
+    const char* def_ext, const std::string& default_name) {
 #ifdef _WIN32
     char path[MAX_PATH] = {};
-    BROWSEINFOA browse_info = {};
-    browse_info.lpszTitle = "Select folder for scene";
-    browse_info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-    LPITEMIDLIST item_id = SHBrowseForFolderA(&browse_info);
-    if (!item_id) return {};
+    OPENFILENAMEA ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = nullptr;
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = def_ext;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR | OFN_ENABLESIZING;
+    if (!default_name.empty() && default_name.size() < MAX_PATH)
+        memcpy(path, default_name.c_str(), default_name.size() + 1);
+    if (GetSaveFileNameA(&ofn)) return path;
+    return {};
 
-    SHGetPathFromIDListA(item_id, path);
-    CoTaskMemFree(item_id);
-    return path;
+#elif defined(__linux__)
+    std::string cmd = "zenity --file-selection --save ";
+    cmd += "--file-filter='";
+    cmd += filter_label;
+    cmd += " (*.";
+    cmd += def_ext;
+    cmd += ")' --file-filter='All Files (*)' --confirm-overwrite 2>/dev/null";
+    if (!default_name.empty())
+        cmd += " --filename='" + default_name + "'";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return {};
+    char result[1024] = {};
+    if (fgets(result, sizeof(result), pipe)) {
+        size_t len = strlen(result);
+        if (len > 0 && result[len - 1] == '\n') result[len - 1] = '\0';
+    }
+    pclose(pipe);
+    return result;
+
+#elif defined(__APPLE__)
+    std::string script = "POSIX path of (choose file name with prompt \"Save\"";
+    if (!default_name.empty()) {
+        std::string escaped = default_name;
+        std::string::size_type pos;
+        while ((pos = escaped.find('\\')) != std::string::npos) escaped.replace(pos, 1, "\\\\");
+        while ((pos = escaped.find('"')) != std::string::npos) escaped.replace(pos, 1, "\\\"");
+        script += " default name \"" + escaped + "\"";
+    }
+    script += ")";
+    std::string cmd = "osascript -e \"" + script + "\" 2>/dev/null";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return {};
+    char result[1024] = {};
+    if (fgets(result, sizeof(result), pipe)) {
+        size_t len = strlen(result);
+        if (len > 0 && result[len - 1] == '\n') result[len - 1] = '\0';
+    }
+    pclose(pipe);
+    return result;
+
 #else
     return {};
 #endif
+}
+
+static std::string browse_scene_save_path(const std::string& default_name) {
+    return native_save_file_dialog("Quark Scene",
+        "Quark Scene (*.scene)\0*.scene\0All Files (*.*)\0*.*\0", "scene", default_name);
+}
+
+void editor_save_as(Editor& editor) {
+    const std::string default_name =
+        std::filesystem::path(editor.project_path).filename().string() + kSceneExtension;
+    const std::string selected_file = browse_scene_save_path(default_name);
+    if (selected_file.empty()) return;
+
+    std::filesystem::path save_path(selected_file);
+    if (save_path.extension() != kSceneExtension)
+        save_path += kSceneExtension;
+
+    const std::filesystem::path root_path = save_path.parent_path();
+    std::error_code error;
+    std::filesystem::create_directories(root_path, error);
+
+    project_save_scene(save_path.string(), editor.scene);
+    editor.project_path = root_path.string();
+    editor.current_asset_path = root_path / "resources";
+    std::filesystem::create_directories(editor.current_asset_path, error);
+    editor.scene_dirty = false;
 }
 
 void ApplyCustomImGuiTheme();
@@ -1481,16 +1554,8 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 project_save(editor.project_path, editor.scene);
                 editor.scene_dirty = false;
             }
-            if (ImGui::MenuItem("Save As...")) {
-                const std::string selected_folder = browse_project_folder();
-                if (!selected_folder.empty()) {
-                    project_save(selected_folder, editor.scene);
-                    editor.project_path = selected_folder;
-                    editor.current_asset_path = std::filesystem::path(selected_folder) / "resources";
-                    std::error_code error;
-                    std::filesystem::create_directories(editor.current_asset_path, error);
-                    editor.scene_dirty = false;
-                }
+            if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S")) {
+                editor_save_as(editor);
             }
             ImGui::Separator();
             if (ImGui::MenuItem(lang.word("exit"))) {
@@ -1557,7 +1622,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                     const MeshComponent* created_mesh = created.get_mesh_component();
                     if (created_mesh && has_valid_model_data(created_mesh->model)) {
                         editor.scene.entities.push_back(created);
-                        editor.scene.selected = static_cast<int>(editor.scene.entities.size()) - 1;
+                        editor.scene.select_entity(static_cast<int>(editor.scene.entities.size()) - 1, false);
                     }
                 }
             }
@@ -1566,7 +1631,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 editor.save_state();
                 Entity created = make_light_entity(editor.scene, -1);
                 editor.scene.entities.push_back(created);
-                editor.scene.selected = static_cast<int>(editor.scene.entities.size()) - 1;
+                editor.scene.select_entity(static_cast<int>(editor.scene.entities.size()) - 1, false);
             }
             ImGui::EndMenu();
         }
@@ -1631,6 +1696,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                     if (!mesh || !has_valid_model_data(mesh->model)) continue;
                     entity.parent_id = parent_index;
                     editor.scene.entities.push_back(entity);
+                    editor.scene.select_entity(static_cast<int>(editor.scene.entities.size()) - 1, false);
                 }
             }
             ImGui::Separator();
@@ -1638,7 +1704,7 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
                 editor.save_state();
                 Entity entity = make_light_entity(editor.scene, parent_index);
                 editor.scene.entities.push_back(entity);
-                editor.scene.selected = static_cast<int>(editor.scene.entities.size()) - 1;
+                editor.scene.select_entity(static_cast<int>(editor.scene.entities.size()) - 1, false);
             }
             ImGui::EndMenu();
         }

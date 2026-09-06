@@ -2,10 +2,10 @@
 
 #define QUARK_VERSION_MAJOR 1
 #define QUARK_VERSION_MINOR 0
-#define QUARK_VERSION_PATCH 0
+#define QUARK_VERSION_PATCH 1
 #define QUARK_VERSION_BUILD 0
 
-#define QUARK_VERSION_STRING "1.0.0.0"
+#define QUARK_VERSION_STRING "1.0.1"
 #define QUARK_PRODUCT_NAME "Quark Engine"
 #define QUARK_COMPANY_NAME "Quark Engine Development Team"
 #define QUARK_COPYRIGHT "Copyright (C) 2026 Quark Engine Development Team"

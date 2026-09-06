@@ -4,7 +4,9 @@ in vec3 fragPosition;
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragNormal;
+in vec3 fragTangent;
 uniform sampler2D texture0;
+uniform sampler2D normalMap;
 uniform sampler2D shadowMaps[4];
 uniform mat4 lightViews[4];
 uniform mat4 lightProjections[4];
@@ -83,6 +85,13 @@ void main()
 
     vec4 tint       = colDiffuse * fragColor;
     vec3 normal     = normalize(fragNormal);
+    vec3 tangent    = normalize(fragTangent);
+    if (abs(dot(normal, tangent)) < 0.999f)
+    {
+        vec3 bitangent = normalize(cross(normal, tangent));
+        vec3 mapNormal = texture(normalMap, fragTexCoord).rgb * 2.0 - 1.0;
+        normal = normalize(mat3(tangent, bitangent, normal) * mapNormal);
+    }
     vec3 viewD      = normalize(viewPos - fragPosition);
     vec3 lightAccum = vec3(0.0);
     vec3 specular   = vec3(0.0);

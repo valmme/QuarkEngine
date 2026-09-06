@@ -37,6 +37,8 @@ Entity clone_entity_instance(const Entity& source, Scene& scene);
 void erase_entity_after_hierarchy(Editor& editor, int index);
 void delete_entity(Editor& editor, Entity* entity);
 
+void editor_save_as(Editor& editor);
+
 void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* ctx);
 
 void draw_gizmo(Editor& editor, FlyCamera camera);

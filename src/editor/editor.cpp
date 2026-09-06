@@ -1,4 +1,4 @@
-﻿#include "editor/editor.h"
+#include "editor/editor.h"
 
 #include "editor/editor_assets.h"
 #include "editor/editor_ui.h"
@@ -33,12 +33,23 @@ void restore_entity_material(Entity& entity) {
     MaterialComponent* material = entity.get_material_component();
     if (!material) return;
 
+    auto apply_texture = [&]() {
+        MeshComponent* mesh = entity.get_mesh_component();
+        if (!mesh || !material->texture.id) return;
+        for (int index = 0; index < mesh->model.materialCount; ++index) {
+            if (mesh->model.materials[index].maps) {
+                mesh->model.materials[index].maps[MATERIAL_MAP_ALBEDO].texture = material->texture;
+            }
+        }
+    };
+
     if (!material->albedo_texture_name.empty()) {
         for (const auto& option : texture_options) {
             if (option.name == material->albedo_texture_name) {
                 material->texture = option.texture;
                 material->texture_source = TEXTURE_EXTERNAL;
                 mark_entity_uv_dirty(&entity);
+                apply_texture();
                 return;
             }
         }
@@ -48,6 +59,7 @@ void restore_entity_material(Entity& entity) {
         load_material_to_entity(&entity, material->texture_name, -1);
         material->texture_source = TEXTURE_EXTERNAL;
         mark_entity_uv_dirty(&entity);
+        apply_texture();
         return;
     }
 
@@ -58,14 +70,30 @@ void restore_entity_material(Entity& entity) {
         clear_material_textures(&entity);
     }
     mark_entity_uv_dirty(&entity);
+    apply_texture();
 }
 
 void restore_scene_entity_models(Scene& scene) {
     for (auto& entity : scene.entities) {
         MeshComponent* mesh = entity.get_mesh_component();
-        if (!mesh || !mesh->asset) continue;
+        if (!mesh) continue;
 
-        if (mesh->asset->is_procedural) {
+        mesh->asset = mesh->asset_name.empty() ? nullptr : find_asset_by_name(mesh->asset_name);
+        if (!mesh->asset) {
+            mesh->model = {};
+            mesh->owns_model_instance = false;
+            continue;
+        }
+
+        if ((mesh->is_editable_mesh || mesh->vertex_gizmo) && !mesh->editable_mesh.vertices.empty()) {
+            mesh->model = {};
+            rebuild_mesh_from_editable(mesh->model, mesh->editable_mesh);
+            mesh->owns_model_instance = true;
+            store_uv(&entity);
+            store_material_textures(&entity);
+            apply_mesh_overrides(entity);
+            restore_entity_material(entity);
+        } else if (mesh->asset->is_procedural) {
             mesh->model = mesh->asset->generator(mesh->segments);
             mesh->owns_model_instance = true;
             store_uv(&entity);
@@ -76,7 +104,7 @@ void restore_scene_entity_models(Scene& scene) {
             if (!load_model_instance(*mesh->asset, mesh->model)) {
                 mesh->asset = nullptr;
                 mesh->asset_name.clear();
-                mesh->model;
+                mesh->model = {};
                 mesh->owns_model_instance = false;
                 continue;
             }
@@ -121,6 +149,7 @@ static SceneState capture_scene_state(const Scene& scene) {
     SceneState state;
     state.selected = scene.selected;
     state.selected_entities = scene.selected_entities;
+    state.materials.reserve(scene.entities.size());
 
     for (auto entity : scene.entities) {
         MeshComponent* mesh = entity.get_mesh_component();
@@ -132,9 +161,26 @@ static SceneState capture_scene_state(const Scene& scene) {
 
         MaterialComponent* material = entity.get_material_component();
         if (material) {
-            material->texture = {};
             material->original_material_textures.clear();
         }
+
+        SceneState::MaterialSnapshot material_snapshot;
+        if (const MaterialComponent* source_material = entity.get_material_component()) {
+            material_snapshot.texture_source = source_material->texture_source;
+            material_snapshot.texture = source_material->texture;
+            material_snapshot.albedo_texture_name = source_material->albedo_texture_name;
+            material_snapshot.texture_name = source_material->texture_name;
+            material_snapshot.normal_texture_name = source_material->normal_texture_name;
+            material_snapshot.material_slot_sources = source_material->material_slot_sources;
+            material_snapshot.color = source_material->color;
+            material_snapshot.outline_color = source_material->outline_color;
+            material_snapshot.auto_uv = source_material->auto_uv;
+            material_snapshot.texture_stretch = source_material->texture_stretch;
+            material_snapshot.texture_repeat_u = source_material->texture_repeat_u;
+            material_snapshot.texture_repeat_v = source_material->texture_repeat_v;
+            material_snapshot.uv_scale = source_material->uv_scale;
+        }
+        state.materials.push_back(std::move(material_snapshot));
 
         LightComponent* light = entity.get_light_component();
         if (light) {
@@ -238,8 +284,10 @@ static SceneState capture_material_state(const Scene& scene) {
         SceneState::MaterialSnapshot snapshot;
         if (const MaterialComponent* material = entity.get_material_component()) {
             snapshot.texture_source = material->texture_source;
+            snapshot.texture = material->texture;
             snapshot.albedo_texture_name = material->albedo_texture_name;
             snapshot.texture_name = material->texture_name;
+            snapshot.normal_texture_name = material->normal_texture_name;
             snapshot.material_slot_sources = material->material_slot_sources;
             snapshot.color = material->color;
             snapshot.outline_color = material->outline_color;
@@ -252,6 +300,130 @@ static SceneState capture_material_state(const Scene& scene) {
         state.materials.push_back(std::move(snapshot));
     }
     return state;
+}
+
+static bool is_removable_component_type(const std::string& type_name) {
+    return type_name == "Material" || type_name == "Light" ||
+           type_name == "Collision" || type_name == "3D Text";
+}
+
+static nlohmann::json capture_component_list(const Entity& entity) {
+    nlohmann::json result = nlohmann::json::array();
+    const ComponentManager* cm = entity.get_components();
+    if (!cm) return result;
+
+    for (const auto& comp : cm->get_all_components()) {
+        if (!comp || !is_removable_component_type(comp->get_type_name())) continue;
+
+        nlohmann::json entry;
+        entry["type"] = comp->get_type_name();
+        entry["enabled"] = comp->enabled;
+        nlohmann::json data;
+        comp->serialize(data);
+        entry["data"] = data;
+        result.push_back(std::move(entry));
+    }
+    return result;
+}
+
+static SceneState capture_component_state(const Scene& scene, int entity_index) {
+    SceneState state;
+    state.component_only = true;
+    state.component_entity_index = entity_index;
+    state.selected = scene.selected;
+    state.selected_entities = scene.selected_entities;
+    if (entity_index >= 0 && entity_index < static_cast<int>(scene.entities.size())) {
+        state.component_data = capture_component_list(scene.entities[entity_index]).dump();
+    }
+    return state;
+}
+
+static void restore_component_state(Scene& scene, const SceneState& state) {
+    const int index = state.component_entity_index;
+    if (index < 0 || index >= static_cast<int>(scene.entities.size())) return;
+
+    Entity& entity = scene.entities[index];
+    ComponentManager* cm = entity.get_components();
+    if (!cm) return;
+
+    nlohmann::json desired = nlohmann::json::parse(state.component_data, nullptr, false);
+    if (!desired.is_array()) return;
+
+    std::vector<std::string> desired_types;
+    for (const auto& entry : desired) {
+        if (entry.contains("type")) desired_types.push_back(entry["type"].get<std::string>());
+    }
+
+    bool restore_needs_material = false;
+    bool entity_has_light = false;
+    {
+        auto& comps = cm->get_all_components();
+
+        for (size_t i = 0; i < comps.size();) {
+            auto comp = comps[i];
+            if (!comp || !is_removable_component_type(comp->get_type_name())) { ++i; continue; }
+
+            const std::string type_name = comp->get_type_name();
+            const bool keep = std::find(desired_types.begin(), desired_types.end(), type_name) != desired_types.end();
+            if (keep) {
+                if (type_name == "Light") entity_has_light = true;
+                ++i;
+                continue;
+            }
+
+            if (auto light = std::dynamic_pointer_cast<LightComponent>(comp)) {
+                if (light->created && light->light.id >= 0) free_light_id(light->light.id);
+                light->created = false;
+                light->light.id = -1;
+            }
+            comps.erase(comps.begin() + i);
+        }
+
+        for (const auto& entry : desired) {
+            if (!entry.contains("type")) continue;
+            const std::string type_name = entry["type"].get<std::string>();
+            const bool present = std::any_of(comps.begin(), comps.end(),
+                [&](const std::shared_ptr<Component>& existing) {
+                    return existing && existing->get_type_name() == type_name;
+                });
+            if (present) {
+                if (type_name == "Light") entity_has_light = true;
+                continue;
+            }
+
+            std::shared_ptr<Component> comp;
+            if (type_name == "Material") {
+                comp = std::make_shared<MaterialComponent>();
+                restore_needs_material = true;
+            }
+            else if (type_name == "Light") {
+                comp = std::make_shared<LightComponent>();
+                entity_has_light = true;
+            }
+            else if (type_name == "Collision") {
+                comp = std::make_shared<CollisionComponent>();
+            }
+            else if (type_name == "3D Text") {
+                comp = std::make_shared<Text3DComponent>();
+            }
+            if (!comp) continue;
+
+            comp->enabled = entry.value("enabled", true);
+            if (entry.contains("data")) comp->deserialize(entry["data"]);
+            comps.push_back(comp);
+        }
+    }
+
+    if (restore_needs_material) {
+        editor_internal::restore_entity_material(entity);
+    }
+
+    if (entity_has_light) {
+        editor_internal::reset_scene_light_runtime(scene);
+    }
+
+    scene.selected = state.selected;
+    scene.selected_entities = state.selected_entities;
 }
 
 static void restore_material_state(Scene& scene, const SceneState& state) {
@@ -273,7 +445,8 @@ static void restore_material_state(Scene& scene, const SceneState& state) {
         material->texture_repeat_u = snapshot.texture_repeat_u;
         material->texture_repeat_v = snapshot.texture_repeat_v;
         material->uv_scale = snapshot.uv_scale;
-        material->texture = {};
+        material->texture = snapshot.texture;
+        material->normal_texture_name = snapshot.normal_texture_name;
 
         clear_material_textures(&scene.entities[index]);
         for (int slot = 0; slot < mesh->model.materialCount; ++slot) {
@@ -286,25 +459,84 @@ static void restore_material_state(Scene& scene, const SceneState& state) {
             for (const auto& option : texture_options) {
                 if (option.name == material->albedo_texture_name) {
                     material->texture = option.texture;
+                    material->texture_source = TEXTURE_EXTERNAL;
+                    for (int slot = 0; slot < mesh->model.materialCount; ++slot) {
+                        if (mesh->model.materials[slot].maps) {
+                            if (slot >= static_cast<int>(material->material_slot_sources.size()) ||
+                                material->material_slot_sources[slot].empty()) {
+                                mesh->model.materials[slot].maps[MATERIAL_MAP_ALBEDO].texture = material->texture;
+                            }
+                        }
+                    }
                     break;
+                }
+            }
+        } else if (material->texture.id != 0) {
+            material->texture_source = TEXTURE_EXTERNAL;
+            for (int slot = 0; slot < mesh->model.materialCount; ++slot) {
+                if (mesh->model.materials[slot].maps) {
+                    if (slot >= static_cast<int>(material->material_slot_sources.size()) ||
+                        material->material_slot_sources[slot].empty()) {
+                        mesh->model.materials[slot].maps[MATERIAL_MAP_ALBEDO].texture = material->texture;
+                    }
                 }
             }
         } else if (!material->texture_name.empty()) {
             load_material_to_entity(&scene.entities[index], material->texture_name, -1);
+            material->texture_source = TEXTURE_EXTERNAL;
         } else if (material->texture_source == TEXTURE_MODEL) {
             restore_model_textures(&scene.entities[index]);
+        } else if (material->texture_source == TEXTURE_NONE) {
+            material->texture = {0};
+            clear_material_textures(&scene.entities[index]);
+        }
+
+        if (!material->normal_texture_name.empty()) {
+            for (const auto& option : texture_options) {
+                if (option.name != material->normal_texture_name) continue;
+                for (int slot = 0; slot < mesh->model.materialCount; ++slot) {
+                    if (mesh->model.materials[slot].maps) {
+                        mesh->model.materials[slot].maps[MATERIAL_MAP_NORMAL].texture = option.texture;
+                    }
+                }
+                break;
+            }
         }
         mark_entity_uv_dirty(&scene.entities[index]);
+        refresh_entity_render_state(scene.entities[index]);
     }
     scene.selected = state.selected;
     scene.selected_entities = state.selected_entities;
 }
 
 static void restore_hierarchy_state(Scene& scene, const SceneState& state) {
-    const size_t count = std::min(scene.entities.size(), state.parent_ids.size());
+    if (state.parent_ids.size() != scene.entities.size() ||
+        state.positions.size() != scene.entities.size() ||
+        state.rotations.size() != scene.entities.size() ||
+        state.scales.size() != scene.entities.size()) return;
+
+    std::vector<int> parent_ids = state.parent_ids;
+    for (size_t index = 0; index < parent_ids.size(); ++index) {
+        std::vector<bool> visited(parent_ids.size(), false);
+        int current = static_cast<int>(index);
+        while (current >= 0 && current < static_cast<int>(parent_ids.size())) {
+            if (visited[current]) {
+                parent_ids[index] = -1;
+                break;
+            }
+            visited[current] = true;
+            current = parent_ids[current];
+        }
+        if (parent_ids[index] < 0 || parent_ids[index] >= static_cast<int>(parent_ids.size()) ||
+            parent_ids[index] == static_cast<int>(index)) {
+            parent_ids[index] = -1;
+        }
+    }
+
+    const size_t count = scene.entities.size();
     for (size_t index = 0; index < count; ++index) {
         Entity& entity = scene.entities[index];
-        entity.parent_id = state.parent_ids[index];
+        entity.parent_id = parent_ids[index];
         if (TransformComponent* transform = entity.get_transform_component()) {
             transform->position = state.positions[index];
             transform->rotation = state.rotations[index];
@@ -334,6 +566,14 @@ void Editor::save_light_state() {
 void Editor::save_hierarchy_state() {
     scene_dirty = true;
     undo_stack.push(capture_hierarchy_state(scene));
+    while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
+        undo_stack.pop();
+    while (!redo_stack.empty()) redo_stack.pop();
+}
+
+void Editor::save_component_state(int entity_index) {
+    scene_dirty = true;
+    undo_stack.push(capture_component_state(scene, entity_index));
     while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
         undo_stack.pop();
     while (!redo_stack.empty()) redo_stack.pop();
@@ -389,8 +629,10 @@ void Editor::save_material_state_before(Entity* entity, const MaterialComponent&
     SceneState state = capture_material_state(scene);
     auto& snapshot = state.materials[entity_index];
     snapshot.texture_source = material.texture_source;
+    snapshot.texture = material.texture;
     snapshot.albedo_texture_name = material.albedo_texture_name;
     snapshot.texture_name = material.texture_name;
+    snapshot.normal_texture_name = material.normal_texture_name;
     snapshot.material_slot_sources = material.material_slot_sources;
     snapshot.color = material.color;
     snapshot.outline_color = material.outline_color;
@@ -443,6 +685,12 @@ void Editor::undo() {
         return;
     }
 
+    if (previous.component_only) {
+        redo_stack.push(capture_component_state(scene, previous.component_entity_index));
+        restore_component_state(scene, previous);
+        return;
+    }
+
     redo_stack.push(capture_scene_state(scene));
 
     scene.release_resources();
@@ -451,6 +699,7 @@ void Editor::undo() {
     scene.selected_entities = previous.selected_entities;
     editor_internal::reset_scene_light_runtime(scene);
     editor_internal::restore_scene_entity_models(scene);
+    restore_material_state(scene, previous);
 }
 
 void Editor::redo() {
@@ -494,6 +743,12 @@ void Editor::redo() {
         return;
     }
 
+    if (next.component_only) {
+        undo_stack.push(capture_component_state(scene, next.component_entity_index));
+        restore_component_state(scene, next);
+        return;
+    }
+
     undo_stack.push(capture_scene_state(scene));
     while (undo_stack.size() > static_cast<size_t>(g_editor_preferences.undo_history_limit))
         undo_stack.pop();
@@ -504,6 +759,7 @@ void Editor::redo() {
     scene.selected_entities = next.selected_entities;
     editor_internal::reset_scene_light_runtime(scene);
     editor_internal::restore_scene_entity_models(scene);
+    restore_material_state(scene, next);
 }
 
 void Editor::handle_input() {
@@ -546,8 +802,11 @@ void Editor::handle_input() {
     }
 
     const bool ctrl = (IsKeyDown(KeyboardKey::LeftControl) || IsKeyDown(KeyboardKey::RightControl)) && keyboard_available;
+    const bool shift_down = IsKeyDown(KeyboardKey::LeftShift) || IsKeyDown(KeyboardKey::RightShift);
 
-    if (ctrl && IsKeyPressed(KeyboardKey::S)) {
+    if (ctrl && shift_down && IsKeyPressed(KeyboardKey::S)) {
+        editor_save_as(*this);
+    } else if (ctrl && IsKeyPressed(KeyboardKey::S)) {
         project_save(project_path, scene);
         scene_dirty = false;
     }
