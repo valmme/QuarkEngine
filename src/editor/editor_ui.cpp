@@ -1585,11 +1585,11 @@ void draw_ui(Editor& editor, Shader shader, FlyCamera& camera, PluginContext* pl
 
     auto draw_create_menu = [&](int parent_index) {
         if (ImGui::BeginMenu(lang.word("create"))) {
-            editor.save_state();
             for (int asset_index = 0; asset_index < static_cast<int>(assets.size()); asset_index++) {
                 auto& asset = assets[asset_index];
                 const std::string label = asset.name + "##create_" + std::to_string(asset_index);
                 if (ImGui::MenuItem(label.c_str())) {
+                    editor.save_state();
                     Entity entity = make_entity_from_asset(editor.scene, asset);
                     const MeshComponent* mesh = entity.get_mesh_component();
                     if (!mesh || !has_valid_model_data(mesh->model)) continue;
